@@ -1,0 +1,7 @@
+src/
+tests/
+docs/
+.github/
+.env*
+tsconfig.json
+*.map
