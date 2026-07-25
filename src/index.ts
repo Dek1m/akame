@@ -20,7 +20,6 @@ import { createCodeGraphTool } from "./tools/code-graph-tool.js";
 import { createDependencyAnalyzerTool } from "./tools/dependency-analyzer-tool.js";
 import { createMigrateLegacyGranulesTool } from "./tools/migrate-legacy-granules-tool.js";
 import { createGraphHealthTool } from "./tools/graph-health-tool.js";
-import { createInfraScanTool } from "./tools/infra-scan-tool.js";
 
 const akamePlugin: Plugin = async (
   input: PluginInput,
@@ -39,7 +38,6 @@ const akamePlugin: Plugin = async (
   const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log);
   const migrateLegacyGranulesTool = createMigrateLegacyGranulesTool(config, log);
   const graphHealthTool = createGraphHealthTool(config, log);
-  const infraScanTool = createInfraScanTool(config, log);
 
   return {
     dispose: async () => {
@@ -123,7 +121,6 @@ const akamePlugin: Plugin = async (
       dependency_analyzer: dependencyAnalyzerTool,
       migrate_legacy_granules: migrateLegacyGranulesTool,
       graph_health: graphHealthTool,
-      infra_scan: infraScanTool,
     },
   };
 };
