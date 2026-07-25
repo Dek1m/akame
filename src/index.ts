@@ -32,10 +32,10 @@ const akamePlugin: Plugin = async (
 
   // Создаём тулы (один раз, при загрузке плагина)
   const granulateTool = createGranulateTool(config, log);
-  const codeIndexTool = createCodeIndexTool(config, log);
+  const codeIndexTool = createCodeIndexTool(config, log, input.directory);
   const codeDiffTool = createCodeDiffTool(config, log);
   const codeGraphTool = createCodeGraphTool(config, log);
-  const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log);
+  const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log, input.directory);
   const migrateLegacyGranulesTool = createMigrateLegacyGranulesTool(config, log);
   const graphHealthTool = createGraphHealthTool(config, log);
 

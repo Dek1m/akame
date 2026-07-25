@@ -9,6 +9,7 @@ import { EXCLUDE_DIRS } from "../constants.js";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 import type { CodeLink } from "../granulator/schema.js";
+import { resolveSafePath } from "../security/validate.js";
 
 // ── Константы ──
 
@@ -208,7 +209,8 @@ function getModule(relPath: string): string {
 
 export function createDependencyAnalyzerTool(
   config: AkameConfig,
-  log: Logger
+  log: Logger,
+  workspaceDir: string
 ) {
   const mcp = new MCPClient(config);
 
@@ -236,7 +238,8 @@ export function createDependencyAnalyzerTool(
         throw new Error(errMsg);
       }
 
-      const { project, directory } = args;
+      const { project, directory: rawDir } = args;
+      const directory = resolveSafePath(rawDir, workspaceDir);
       log.info(
         `dependency_analyzer: сканирую ${project} в ${directory}`
       );

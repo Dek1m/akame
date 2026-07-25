@@ -29,6 +29,40 @@ export function resetCooldowns(): void {
 type MessageInfo = { info: Message; parts: unknown[] };
 type SessionInfo = { id: string };
 
+// ── Вспомогательные функции ──
+
+function extractTextContent(msg: MessageInfo): string {
+  if (!msg.parts || msg.parts.length === 0) {
+    return "";
+  }
+  return msg.parts
+    .filter((p: unknown) => (p as { type?: string }).type === "text")
+    .map((p: unknown) => (p as { text?: string }).text ?? "")
+    .join("\n");
+}
+
+function buildGranulateContext(
+  sessionId: string,
+  agent: string,
+  projectId: string,
+  messages: MessageInfo[],
+  participants: string[]
+): GranulateContext {
+  return {
+    sessionId,
+    agent,
+    projectId,
+    messages: messages.map((m: MessageInfo) => ({
+      id: m.info.id || `msg_${Date.now()}`,
+      role: m.info.role,
+      content: extractTextContent(m),
+    })),
+    participants,
+  };
+}
+
+// ── Обработчики событий ──
+
 export async function handleSessionIdle(
   input: PluginInput,
   event: Event,
@@ -114,17 +148,13 @@ export async function handleSessionIdle(
       ? eventPath.split("/").pop() || config.userId
       : config.userId;
 
-    const context: GranulateContext = {
+    const context = buildGranulateContext(
       sessionId,
-      agent: "session.idle",
-      projectId: detectedProject,
-      messages: messages.map((m: MessageInfo) => ({
-        id: m.info.id || `msg_${Date.now()}`,
-        role: m.info.role,
-        content: extractTextContent(m),
-      })),
-      participants,
-    };
+      "session.idle",
+      detectedProject,
+      messages,
+      participants
+    );
 
     await granulate(input, context, config, log);
     granulatedSessions.add(sessionId);
@@ -133,16 +163,6 @@ export async function handleSessionIdle(
       `session.idle ошибка: ${err instanceof Error ? err.message : String(err)}`
     );
   }
-}
-
-function extractTextContent(msg: MessageInfo): string {
-  if (!msg.parts || msg.parts.length === 0) {
-    return "";
-  }
-  return msg.parts
-    .filter((p: unknown) => (p as { type?: string }).type === "text")
-    .map((p: unknown) => (p as { text?: string }).text ?? "")
-    .join("\n");
 }
 
 // ── session.compacted — финальная грануляция после сжатия сессии ──
@@ -189,17 +209,13 @@ export async function handleSessionCompacted(
     const roles = new Set(messages.map((m: MessageInfo) => m.info.role));
     const participants = Array.from(roles);
 
-    const context: GranulateContext = {
+    const context = buildGranulateContext(
       sessionId,
-      agent: "memory-granulator",
-      projectId: config.userId,
-      messages: messages.map((m: MessageInfo) => ({
-        id: m.info.id || `msg_${Date.now()}`,
-        role: m.info.role,
-        content: extractTextContent(m),
-      })),
-      participants,
-    };
+      "memory-granulator",
+      config.userId,
+      messages,
+      participants
+    );
 
     await granulate(input, context, config, log);
   } catch (err) {
@@ -251,17 +267,13 @@ export async function handleSessionDiff(
     const roles = new Set(messages.map((m: MessageInfo) => m.info.role));
     const participants = Array.from(roles);
 
-    const context: GranulateContext = {
+    const context = buildGranulateContext(
       sessionId,
-      agent: "memory-granulator",
-      projectId: config.userId,
-      messages: messages.map((m: MessageInfo) => ({
-        id: m.info.id || `msg_${Date.now()}`,
-        role: m.info.role,
-        content: extractTextContent(m),
-      })),
-      participants,
-    };
+      "memory-granulator",
+      config.userId,
+      messages,
+      participants
+    );
 
     await granulate(input, context, config, log);
   } catch (err) {

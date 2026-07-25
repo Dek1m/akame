@@ -6,8 +6,9 @@ import { scanProject } from "../scanner/code-index.js";
 import type { CodeLink } from "../granulator/schema.js";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
+import { resolveSafePath } from "../security/validate.js";
 
-export function createCodeIndexTool(config: AkameConfig, log: Logger) {
+export function createCodeIndexTool(config: AkameConfig, log: Logger, workspaceDir: string) {
   const mcp = new MCPClient(config);
 
   return tool({
@@ -35,7 +36,8 @@ export function createCodeIndexTool(config: AkameConfig, log: Logger) {
         throw new Error(errMsg);
       }
 
-      const { project, directory } = args;
+      const { project, directory: rawDir } = args;
+      const directory = resolveSafePath(rawDir, workspaceDir);
       log.info(`code_index: начинаю сканирование ${project} в ${directory}`);
 
       // ── 1. Сканируем ──
