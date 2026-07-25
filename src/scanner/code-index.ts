@@ -4,6 +4,7 @@
 
 import fs from "fs";
 import path from "path";
+import { EXCLUDE_DIRS } from "../constants.js";
 
 // ── Типы ──────────────────────────────────────────────────────────────────
 
@@ -34,13 +35,6 @@ export interface ScanResult {
 
 // ── Константы ─────────────────────────────────────────────────────────────
 
-const EXCLUDE_DIRS = new Set([
-  "node_modules",
-  ".venv",
-  "dist",
-  "__pycache__",
-  ".git",
-]);
 const TS_EXTS = new Set([".ts", ".tsx"]);
 const PY_EXTS = new Set([".py"]);
 

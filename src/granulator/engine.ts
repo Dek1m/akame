@@ -18,7 +18,10 @@ export interface GranulateContext {
 
 // ── Чтение промпта для грануляции ──
 
-function getSystemPrompt(): string {
+let cachedPrompt: string | null = null;
+let cachedPromptMtime: number = 0;
+
+function getSystemPrompt(log?: Logger): string {
   try {
     const homeDir = process.env.HOME || "/home/opencode";
     const promptPath = path.join(
@@ -29,10 +32,15 @@ function getSystemPrompt(): string {
       "memory-granulator.md"
     );
     if (fs.existsSync(promptPath)) {
-      return fs.readFileSync(promptPath, "utf-8");
+      const mtime = fs.statSync(promptPath).mtimeMs;
+      if (cachedPrompt === null || mtime > cachedPromptMtime) {
+        cachedPrompt = fs.readFileSync(promptPath, "utf-8");
+        cachedPromptMtime = mtime;
+      }
+      return cachedPrompt;
     }
-  } catch {
-    // fallback
+  } catch (err) {
+    log?.debug(`prompt file не удалось прочитать: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   return `Ты — Тишь, специалист по грануляции знаний команды Argenta Team.
@@ -92,7 +100,7 @@ export async function granulate(
       projectId: context.projectId,
     });
 
-    const systemPrompt = getSystemPrompt();
+    const systemPrompt = getSystemPrompt(log);
     let userPrompt: string;
 
     switch (context.mode) {
@@ -146,7 +154,7 @@ async function callLLM(
 
   const sessionId = sessionResult.data?.id;
   if (!sessionId) {
-    throw new Error("Не удалось создать служебную сессию");
+    throw new Error("Не удалось создать служебную сессию: client.session.create вернул пустой id");
   }
   serviceSessions.add(sessionId);
   log.debug(`Создана служебная сессия: ${sessionId}`);
@@ -173,7 +181,7 @@ async function callLLM(
 
     const messages = messagesResult.data ?? [];
     if (messages.length === 0) {
-      throw new Error("LLM не вернул ответ");
+      throw new Error(`LLM не вернул ответ (sessionId=${sessionId}, сообщений: 0)`);
     }
 
     // Ищем ответ ассистента
@@ -182,7 +190,7 @@ async function callLLM(
       .pop();
 
     if (!lastAssistant) {
-      throw new Error("Нет ответа ассистента");
+      throw new Error(`Нет ответа ассистента в сессии ${sessionId}`);
     }
 
     // Извлекаем текст из parts
@@ -195,8 +203,8 @@ async function callLLM(
   } finally {
     try {
       await client.session.delete({ path: { id: sessionId } });
-    } catch {
-      // silent
+    } catch (err) {
+      log.debug(`session delete не удалась: ${err instanceof Error ? err.message : String(err)}`);
     }
     serviceSessions.delete(sessionId);
     log.debug(`Служебная сессия удалена: ${sessionId}`);

@@ -15,6 +15,18 @@ export const NAMESPACES = [
 
 export type Namespace = (typeof NAMESPACES)[number];
 
+// ── Исключённые директории ──
+export const EXCLUDE_DIRS = new Set([
+  "node_modules",
+  ".venv",
+  "dist",
+  "build",
+  "__pycache__",
+  ".git",
+  ".next",
+  "coverage",
+]);
+
 // ── Дефолты конфигурации ──
 export const DEFAULTS = {
   MCP_URL: "http://athena-memory:8000/mcp/",

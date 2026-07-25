@@ -12,12 +12,19 @@
 | `AKAME_API_KEY` | string | — | API-ключ для авторизации (Bearer token) |
 | `AKAME_USER_ID` | string | `akame` | Владелец записей в памяти |
 | `AKAME_GRANULATE_IDLE` | boolean | `true` | Гранулировать при `session.idle` |
+| `AKAME_GRANULATE_COMPACTED` | boolean | `true` | Гранулировать при `session.compacted` |
+| `AKAME_GRANULATE_DIFF` | boolean | `false` | Гранулировать при `session.diff` |
 | `AKAME_GRANULATE_FILE` | boolean | `false` | Гранулировать при `file.edited` |
+| `AKAME_GRANULATE_FILE_WATCHER` | boolean | `false` | Гранулировать при `file.watcher.updated` |
 | `AKAME_GRANULATE_TOOL` | boolean | `true` | Гранулировать после git-команд |
+| `AKAME_GRANULATE_TOOL_BEFORE` | boolean | `false` | Pre-processing при `tool.execute.before` |
+| `AKAME_GRANULATE_COMMAND` | boolean | `false` | Гранулировать после выполненных команд |
 | `AKAME_COOLDOWN_MS` | number | `30000` | Cooldown между грануляциями (мс) |
 | `AKAME_DEBOUNCE_MS` | number | `2000` | Debounce для `file.edited` (мс) |
 | `AKAME_MAX_BATCH` | number | `20` | Макс. гранул в одном `ingest_batch` |
 | `AKAME_MAX_MESSAGES` | number | `50` | Макс. сообщений для анализа |
+| `AKAME_ENRICH_LINKS` | boolean | `true` | Пост-обработка: автосвязи между гранулами |
+| `AKAME_ENRICH_PROMPT` | boolean | `true` | Внедрение релевантных гранул в промпт |
 
 ---
 
@@ -31,10 +38,19 @@ AKAME_API_KEY=sk-athena-your-key-here
 # ── Идентификатор владельца ──
 AKAME_USER_ID=akame
 
-# ── Триггеры грануляции ──
+# ── Триггеры грануляции: события сессий ──
 AKAME_GRANULATE_IDLE=true
+AKAME_GRANULATE_COMPACTED=true
+AKAME_GRANULATE_DIFF=false
+
+# ── Триггеры грануляции: события файлов ──
 AKAME_GRANULATE_FILE=false
+AKAME_GRANULATE_FILE_WATCHER=false
+
+# ── Триггеры грануляции: события тулов ──
 AKAME_GRANULATE_TOOL=true
+AKAME_GRANULATE_TOOL_BEFORE=false
+AKAME_GRANULATE_COMMAND=false
 
 # ── Таймауты ──
 AKAME_COOLDOWN_MS=30000
@@ -43,6 +59,10 @@ AKAME_DEBOUNCE_MS=2000
 # ── Лимиты ──
 AKAME_MAX_BATCH=20
 AKAME_MAX_MESSAGES=50
+
+# ── Обогащение гранул ──
+AKAME_ENRICH_LINKS=true
+AKAME_ENRICH_PROMPT=true
 ```
 
 ---
@@ -93,12 +113,19 @@ AKAME_MAX_MESSAGES=50
         "AKAME_API_KEY": "sk-athena-your-key",
         "AKAME_USER_ID": "akame",
         "AKAME_GRANULATE_IDLE": "true",
+        "AKAME_GRANULATE_COMPACTED": "true",
+        "AKAME_GRANULATE_DIFF": "false",
         "AKAME_GRANULATE_FILE": "false",
+        "AKAME_GRANULATE_FILE_WATCHER": "false",
         "AKAME_GRANULATE_TOOL": "true",
+        "AKAME_GRANULATE_TOOL_BEFORE": "false",
+        "AKAME_GRANULATE_COMMAND": "false",
         "AKAME_COOLDOWN_MS": "30000",
         "AKAME_DEBOUNCE_MS": "2000",
         "AKAME_MAX_BATCH": "20",
-        "AKAME_MAX_MESSAGES": "50"
+        "AKAME_MAX_MESSAGES": "50",
+        "AKAME_ENRICH_LINKS": "true",
+        "AKAME_ENRICH_PROMPT": "true"
       }
     }
   }
@@ -267,6 +294,38 @@ AKAME_MAX_MESSAGES=100
 
 ---
 
+### Обогащение гранул
+
+#### AKAME_ENRICH_LINKS
+
+Включает пост-обработку гранул: автоматическое создание связей между гранулами после грануляции.
+
+```env
+# Включено (по умолчанию)
+AKAME_ENRICH_LINKS=true
+
+# Выключено
+AKAME_ENRICH_LINKS=false
+```
+
+**Когда включать:** Всегда. Автосвязи (`depends_on`, `used_by`, `references` и др.) делают граф знаний связным и навигабельным.
+
+#### AKAME_ENRICH_PROMPT
+
+Внедряет релевантные гранулы из памяти в промпт LLM перед грануляцией. LLM получает контекст предыдущих знаний, что повышает качество новых гранул.
+
+```env
+# Включено (по умолчанию)
+AKAME_ENRICH_PROMPT=true
+
+# Выключено
+AKAME_ENRICH_PROMPT=false
+```
+
+**Когда отключать:** Если промпт становится слишком большим, а модель имеет ограниченное контекстное окно. Либо если релевантные гранулы не помогают качеству.
+
+---
+
 ## Сценарии настройки
 
 ### Локальная разработка
@@ -278,6 +337,8 @@ AKAME_GRANULATE_IDLE=true
 AKAME_GRANULATE_FILE=false
 AKAME_GRANULATE_TOOL=true
 AKAME_COOLDOWN_MS=30000
+AKAME_ENRICH_LINKS=true
+AKAME_ENRICH_PROMPT=true
 ```
 
 ### Команда (Docker)
@@ -287,10 +348,13 @@ AKAME_MCP_URL=http://athena-memory:8000/mcp/
 AKAME_API_KEY=sk-team-shared-key
 AKAME_USER_ID=akame
 AKAME_GRANULATE_IDLE=true
+AKAME_GRANULATE_COMPACTED=true
 AKAME_GRANULATE_FILE=true
 AKAME_GRANULATE_TOOL=true
 AKAME_COOLDOWN_MS=15000
 AKAME_MAX_MESSAGES=100
+AKAME_ENRICH_LINKS=true
+AKAME_ENRICH_PROMPT=true
 ```
 
 ### Продакшен
@@ -305,6 +369,8 @@ AKAME_GRANULATE_TOOL=true
 AKAME_COOLDOWN_MS=60000
 AKAME_MAX_BATCH=10
 AKAME_MAX_MESSAGES=30
+AKAME_ENRICH_LINKS=true
+AKAME_ENRICH_PROMPT=true
 ```
 
 ---

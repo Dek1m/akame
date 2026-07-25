@@ -26,7 +26,15 @@ export function createCodeIndexTool(config: AkameConfig, log: Logger) {
         .describe("Absolute path to the project directory"),
     },
 
-    async execute(args) {
+    async execute(args, context) {
+      // ── Защита ──
+      const caller = context?.agent || "unknown";
+      if (caller !== "memory-granulator") {
+        const errMsg = `Доступ запрещён: агент "${caller}" не имеет права вызывать code_index. Только memory-granulator (Тишь).`;
+        log.warn(errMsg);
+        throw new Error(errMsg);
+      }
+
       const { project, directory } = args;
       log.info(`code_index: начинаю сканирование ${project} в ${directory}`);
 
@@ -58,6 +66,7 @@ export function createCodeIndexTool(config: AkameConfig, log: Logger) {
           }
         }
       } catch (err) {
+        log.debug(`code_index: ошибка search: ${err instanceof Error ? err.message : String(err)}`);
         log.warn(
           `code_index: ошибка search: ${
             err instanceof Error ? err.message : String(err)

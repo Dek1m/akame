@@ -95,13 +95,13 @@ export async function handleSessionIdle(
             });
             const childMsgs: MessageInfo[] = childResult.data ?? [];
             messages.push(...childMsgs);
-          } catch {
-            // silent
+          } catch (err) {
+            log.debug(`children messages не удалось получить: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }
-    } catch {
-      // children может не поддерживаться
+    } catch (err) {
+      log.debug(`children сессии не удалось получить: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Определяем участников

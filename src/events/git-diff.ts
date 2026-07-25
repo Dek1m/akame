@@ -1,5 +1,6 @@
 import { execSync } from "child_process";
 import fs from "fs";
+import type { Logger } from "../logger.js";
 
 export interface DiffResult {
   diff: string;
@@ -12,7 +13,7 @@ export interface DiffResult {
  * Получает diff изменённого файла через git.
  * Если git недоступен или не в репозитории — читает содержимое файла.
  */
-export function getGitDiff(filePath: string): DiffResult {
+export function getGitDiff(filePath: string, log?: Logger): DiffResult {
   const exists = fs.existsSync(filePath);
 
   // Файл удалён
@@ -35,8 +36,8 @@ export function getGitDiff(filePath: string): DiffResult {
         stdio: ["pipe", "pipe", "pipe"],
         maxBuffer: 1024 * 1024, // 1MB
       });
-    } catch {
-      // fallback
+    } catch (err) {
+      log?.debug(`git diff HEAD не удался: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Если файл новый (не в HEAD) — используем git diff --no-index
@@ -51,8 +52,8 @@ export function getGitDiff(filePath: string): DiffResult {
           }
         );
         type = "created";
-      } catch {
-        // fallback
+      } catch (err) {
+        log?.debug(`git diff --no-index не удался: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -64,12 +65,13 @@ export function getGitDiff(filePath: string): DiffResult {
     }
 
     return { diff, filePath, type };
-  } catch {
+  } catch (err) {
+    log?.debug(`Не git-репозиторий: ${err instanceof Error ? err.message : String(err)}`);
     // Не git-репозиторий — просто читаем файл
     try {
       content = fs.readFileSync(filePath, "utf-8");
-    } catch {
-      // файл не читается
+    } catch (readErr) {
+      log?.debug(`Не удалось прочитать файл: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
     }
     return { diff: "", filePath, type: exists ? "modified" : "deleted", content };
   }

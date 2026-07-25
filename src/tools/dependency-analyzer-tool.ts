@@ -5,22 +5,12 @@ import fs from "fs";
 import path from "path";
 import { tool } from "@opencode-ai/plugin";
 import { MCPClient } from "../mcp/client.js";
+import { EXCLUDE_DIRS } from "../constants.js";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 import type { CodeLink } from "../granulator/schema.js";
 
 // ── Константы ──
-
-const EXCLUDE_DIRS = new Set([
-  "node_modules",
-  ".venv",
-  "dist",
-  "build",
-  "__pycache__",
-  ".git",
-  ".next",
-  "coverage",
-]);
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".py"]);
 
@@ -322,6 +312,7 @@ export function createDependencyAnalyzerTool(
           }
         }
       } catch (err) {
+        log.debug(`dependency_analyzer: ошибка search: ${err instanceof Error ? err.message : String(err)}`);
         log.warn(
           `dependency_analyzer: ошибка search: ${err instanceof Error ? err.message : String(err)}`
         );
