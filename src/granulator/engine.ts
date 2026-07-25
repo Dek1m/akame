@@ -3,6 +3,7 @@ import path from "path";
 import type { PluginInput } from "@opencode-ai/plugin";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
+import { MCPClient } from "../mcp/client.js";
 import { storeSessionData } from "./granulate-tool.js";
 import { enrichLinks } from "./link-enricher.js";
 
@@ -102,7 +103,7 @@ export async function granulate(
         userPrompt = buildToolResultPrompt(context);
         break;
       default:
-        userPrompt = buildDialoguePrompt(context);
+        userPrompt = await buildDialoguePrompt(context, config, log);
     }
 
     const result = await callLLM(input, systemPrompt, userPrompt, log);
@@ -214,8 +215,17 @@ function truncateMessages(
 
 // ── Билдеры промптов для разных режимов ──
 
-function buildDialoguePrompt(context: GranulateContext): string {
-  return `Проанализируй диалог и извлеки гранулы знаний.
+async function buildDialoguePrompt(
+  context: GranulateContext,
+  config: AkameConfig,
+  log: Logger
+): Promise<string> {
+  let relevantGranules = "";
+  if (config.enrichPrompt) {
+    relevantGranules = await fetchRelevantGranules(context, config, log);
+  }
+
+  return `${relevantGranules}Проанализируй диалог и извлеки гранулы знаний.
 
 ID сессии: ${context.sessionId}
 Агент: ${context.agent}
@@ -264,4 +274,100 @@ ${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
 - links типа "follows" и "references" где применимо
 
 Используй инструмент granulate_output для сохранения результатов.`;
+}
+
+// ── fetchRelevantGranules — поиск существующих гранул для обогащения промпта ──
+
+const MAX_GRANULES_PROMPT_SIZE = 2000;
+
+async function fetchRelevantGranules(
+  context: GranulateContext,
+  config: AkameConfig,
+  log: Logger
+): Promise<string> {
+  const mcp = new MCPClient(config);
+
+  const keywords = extractKeywords(context.messages);
+  if (keywords.length === 0) return "";
+
+  const namespaces = [
+    "user_facts",
+    "project_meta",
+    "code_knowledge",
+    "dialogue_insights",
+    "infrastructure",
+  ];
+
+  let result = "## Существующие гранулы (используй для links):\n\n";
+  let totalSize = result.length;
+
+  for (const ns of namespaces) {
+    try {
+      const query = keywords.join(" ");
+      const searchResults = await mcp.search(query, config.userId, 3, undefined, ns);
+
+      if (searchResults.length === 0) continue;
+
+      const nsHeader = `### ${ns}:\n`;
+      let nsSection = nsHeader;
+
+      for (const sr of searchResults) {
+        const meta = (sr.metadata as Record<string, unknown>) ?? {};
+        const entityName = meta.entity_name
+          ? `[entity_name: "${meta.entity_name}"] `
+          : "";
+        const content =
+          sr.content.length > 150
+            ? sr.content.slice(0, 147) + "..."
+            : sr.content;
+        nsSection += `- ${entityName}${content}\n`;
+      }
+
+      if (totalSize + nsSection.length > MAX_GRANULES_PROMPT_SIZE) {
+        const remaining = MAX_GRANULES_PROMPT_SIZE - totalSize;
+        if (remaining > nsHeader.length + 20) {
+          nsSection = nsHeader + "- ... (обрезано)\n";
+          result += nsSection;
+        }
+        break;
+      }
+
+      result += nsSection;
+      totalSize += nsSection.length;
+    } catch (err) {
+      log.debug(
+        `fetchRelevantGranules: ошибка для ${ns}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  return result;
+}
+
+function extractKeywords(
+  messages: GranulateContext["messages"]
+): string[] {
+  const keywords = new Set<string>();
+
+  for (const msg of messages) {
+    const text = msg.content;
+
+    // entity_name: слова с большой буквы (PascalCase / CamelCase)
+    const entityMatches =
+      text.match(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b/g) ?? [];
+    for (const m of entityMatches) {
+      if (m.length > 2) keywords.add(m);
+    }
+
+    // Имена файлов: *.ts, *.js, *.py, *.md, *.json, *.yaml, *.sql и т.д.
+    const fileMatches =
+      text.match(
+        /\b[\w\-/]+\.(ts|js|py|md|json|ya?ml|sql|tsx|jsx|css|html)\b/g
+      ) ?? [];
+    for (const m of fileMatches) {
+      keywords.add(m);
+    }
+  }
+
+  return Array.from(keywords).slice(0, 20);
 }

@@ -33,7 +33,9 @@ export type LinkType =
   | "references" | "follows" | "precedes" | "alternative_to"
   | "causes" | "prevents"
   // Инфраструктурные
-  | "runs_on" | "exposes" | "mounts";
+  | "runs_on" | "exposes" | "mounts"
+  // Cross-namespace
+  | "derived_from" | "motivates" | "informs" | "informed_by" | "connected_to";
 
 export interface CodeLink {
   type: LinkType;
@@ -110,7 +112,50 @@ export const ALL_LINK_TYPES = [
   "references", "follows", "precedes", "alternative_to",
   "causes", "prevents",
   "runs_on", "exposes", "mounts",
+  "derived_from", "motivates", "informs", "informed_by", "connected_to",
 ] as const;
+
+// ── CNLM-матрица: разрешённые типы связей между namespace ──
+// source namespace → target namespace → разрешённые link types
+// "*" означает все code-intrinsic типы (depends_on, used_by, extends, implements,
+// contains, contained_by, calls, called_by, related_to, references, и др.)
+export const CROSS_NAMESPACE_LINK_RULES: Record<string, Record<string, string[]>> = {
+  user_facts: {
+    dialogue_insights: ["derived_from", "references"],
+    project_meta:      ["motivates", "references"],
+    code_knowledge:    ["references"],
+    infrastructure:    ["references"],
+    user_facts:        ["related_to", "contradicts", "references"],
+  },
+  dialogue_insights: {
+    user_facts:        ["derived_from", "references"],
+    project_meta:      ["informs", "references"],
+    code_knowledge:    ["references", "solves"],
+    infrastructure:    ["references"],
+    dialogue_insights: ["related_to", "contradicts", "follows", "precedes", "references"],
+  },
+  project_meta: {
+    user_facts:        ["informed_by", "references"],
+    dialogue_insights: ["informed_by", "references"],
+    code_knowledge:    ["implements_adr", "references"],
+    infrastructure:    ["references"],
+    project_meta:      ["related_to", "contradicts", "follows", "precedes", "alternative_to", "causes", "prevents", "references"],
+  },
+  code_knowledge: {
+    user_facts:        ["references"],
+    dialogue_insights: ["references", "solves"],
+    project_meta:      ["implements_adr", "references"],
+    infrastructure:    ["references"],
+    code_knowledge:    ["*"], // все code-intrinsic
+  },
+  infrastructure: {
+    user_facts:        ["references"],
+    dialogue_insights: ["references"],
+    project_meta:      ["references"],
+    code_knowledge:    ["references"],
+    infrastructure:    ["runs_on", "contains", "contained_by", "exposes", "mounts", "depends_on", "connected_to", "references"],
+  },
+};
 
 // Рекомендации по entity_type для каждого namespace
 export const ENTITY_TYPE_BY_NAMESPACE: Record<string, string[]> = {
@@ -418,6 +463,25 @@ function validateGranule(
       }
       if (typeof link.target !== "string" || link.target.length === 0) {
         throw new Error(`Гранула [${index}]: links[${li}].target обязателен`);
+      }
+    }
+
+    // Проверка cross-namespace link rules (warn, не ошибка)
+    const sourceNs = raw.namespace as string;
+    const rules = CROSS_NAMESPACE_LINK_RULES[sourceNs];
+    if (rules) {
+      for (let li = 0; li < meta.links.length; li++) {
+        const link = meta.links[li] as Record<string, unknown>;
+        const linkType = String(link.type);
+        // Проверяем, разрешён ли linkType хотя бы для одного target namespace
+        const isAllowed = Object.values(rules).some(
+          (allowedTypes) => allowedTypes.includes("*") || allowedTypes.includes(linkType)
+        );
+        if (!isAllowed) {
+          console.warn(
+            `[akame] Гранула [${index}]: links[${li}].type="${linkType}" не найден в CROSS_NAMESPACE_LINK_RULES для source="${sourceNs}"`
+          );
+        }
       }
     }
   }

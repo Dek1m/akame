@@ -20,6 +20,7 @@ export function loadConfig(
     maxBatch: parseInt(env.AKAME_MAX_BATCH ?? String(DEFAULTS.MAX_BATCH), 10),
     maxMessages: parseInt(env.AKAME_MAX_MESSAGES ?? String(DEFAULTS.MAX_MESSAGES), 10),
     enrichLinks: parseBool(env.AKAME_ENRICH_LINKS, DEFAULTS.ENRICH_LINKS),
+    enrichPrompt: parseBool(env.AKAME_ENRICH_PROMPT, DEFAULTS.ENRICH_PROMPT),
   };
 }
 
