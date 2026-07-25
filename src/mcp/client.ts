@@ -153,6 +153,18 @@ export class MCPClient {
     >;
   }
 
+  async recent(
+    namespace?: string,
+    limit?: number,
+    since?: string
+  ): Promise<MemoryRecord[]> {
+    return this.call("memory_recent", {
+      namespace,
+      limit,
+      since,
+    }) as Promise<MemoryRecord[]>;
+  }
+
   async findSimilar(
     content: string,
     userId: string,

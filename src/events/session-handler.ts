@@ -16,10 +16,14 @@ const cooldowns = new Map<string, number>();
 let lastGlobalGranulation = 0;
 const GLOBAL_COOLDOWN_MS = 5_000; // 5 секунд между любыми грануляциями
 
+// Множество уже гранулированных сессий (для дедупликации idle/compacted)
+const granulatedSessions = new Set<string>();
+
 // Сброс cooldown (для тестов)
 export function resetCooldowns(): void {
   lastGlobalGranulation = 0;
   cooldowns.clear();
+  granulatedSessions.clear();
 }
 
 type MessageInfo = { info: Message; parts: unknown[] };
@@ -112,7 +116,7 @@ export async function handleSessionIdle(
 
     const context: GranulateContext = {
       sessionId,
-      agent: "team-lead",
+      agent: "session.idle",
       projectId: detectedProject,
       messages: messages.map((m: MessageInfo) => ({
         id: m.info.id || `msg_${Date.now()}`,
@@ -123,6 +127,7 @@ export async function handleSessionIdle(
     };
 
     await granulate(input, context, config, log);
+    granulatedSessions.add(sessionId);
   } catch (err) {
     log.error(
       `session.idle ошибка: ${err instanceof Error ? err.message : String(err)}`
@@ -138,4 +143,130 @@ function extractTextContent(msg: MessageInfo): string {
     .filter((p: unknown) => (p as { type?: string }).type === "text")
     .map((p: unknown) => (p as { text?: string }).text ?? "")
     .join("\n");
+}
+
+// ── session.compacted — финальная грануляция после сжатия сессии ──
+
+export async function handleSessionCompacted(
+  input: PluginInput,
+  event: Event,
+  config: AkameConfig,
+  log: Logger
+): Promise<void> {
+  if (!config.granulateCompacted) return;
+
+  const eventData = event as unknown as {
+    type: "session.compacted";
+    properties: { sessionID: string };
+  };
+  const sessionId = eventData.properties?.sessionID;
+  if (!sessionId) return;
+
+  if (isServiceSession(sessionId)) {
+    log.debug(`Пропуск служебной сессии (compacted): ${sessionId}`);
+    return;
+  }
+
+  // Дедупликация: если сессия уже гранулирована через session.idle — пропускаем
+  if (granulatedSessions.has(sessionId)) {
+    log.debug(`Сессия уже гранулирована (compacted): ${sessionId}`);
+    return;
+  }
+
+  log.info(`session.compacted: ${sessionId}`);
+
+  try {
+    const { client } = input;
+    const messagesResult = await client.session.messages({
+      path: { id: sessionId },
+    });
+    const messages: MessageInfo[] = messagesResult.data ?? [];
+    if (messages.length === 0) {
+      log.debug(`Нет сообщений в скомпакченной сессии ${sessionId}`);
+      return;
+    }
+
+    const roles = new Set(messages.map((m: MessageInfo) => m.info.role));
+    const participants = Array.from(roles);
+
+    const context: GranulateContext = {
+      sessionId,
+      agent: "memory-granulator",
+      projectId: config.userId,
+      messages: messages.map((m: MessageInfo) => ({
+        id: m.info.id || `msg_${Date.now()}`,
+        role: m.info.role,
+        content: extractTextContent(m),
+      })),
+      participants,
+    };
+
+    await granulate(input, context, config, log);
+  } catch (err) {
+    log.error(
+      `session.compacted ошибка: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+// ── session.diff — грануляция инкрементальных изменений сессии ──
+
+export async function handleSessionDiff(
+  input: PluginInput,
+  event: Event,
+  config: AkameConfig,
+  log: Logger
+): Promise<void> {
+  if (!config.granulateDiff) return;
+
+  const eventData = event as unknown as {
+    type: "session.diff";
+    properties: { sessionID: string };
+  };
+  const sessionId = eventData.properties?.sessionID;
+  if (!sessionId) return;
+
+  if (isServiceSession(sessionId)) {
+    log.debug(`Пропуск служебной сессии (diff): ${sessionId}`);
+    return;
+  }
+
+  log.info(`session.diff: ${sessionId}`);
+
+  // diff события приходят часто — гранулируем выборочно
+  // Пропускаем, если мало времени прошло с последней грануляции этой сессии
+  const now = Date.now();
+  const last = cooldowns.get(`diff_${sessionId}`) || 0;
+  if (now - last < config.cooldownMs) return;
+  cooldowns.set(`diff_${sessionId}`, now);
+
+  try {
+    const { client } = input;
+    const messagesResult = await client.session.messages({
+      path: { id: sessionId },
+    });
+    const messages: MessageInfo[] = messagesResult.data ?? [];
+    if (messages.length === 0) return;
+
+    const roles = new Set(messages.map((m: MessageInfo) => m.info.role));
+    const participants = Array.from(roles);
+
+    const context: GranulateContext = {
+      sessionId,
+      agent: "memory-granulator",
+      projectId: config.userId,
+      messages: messages.map((m: MessageInfo) => ({
+        id: m.info.id || `msg_${Date.now()}`,
+        role: m.info.role,
+        content: extractTextContent(m),
+      })),
+      participants,
+    };
+
+    await granulate(input, context, config, log);
+  } catch (err) {
+    log.error(
+      `session.diff ошибка: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }

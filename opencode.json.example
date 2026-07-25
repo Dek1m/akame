@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "_comment": "// Пример конфигурации permission для плагина akame. Скопируйте нужные секции в ваш opencode.json",
+
+  "permission": {
+    "_comment": "// Глобально запрещаем тулы akame всем агентам",
+    "granulate_output": "deny",
+    "code_index": "allow",
+    "code_diff": "deny",
+    "code_graph": "deny",
+    "dependency_analyzer": "deny"
+  },
+
+  "agent": {
+    "memory-granulator": {
+      "_comment": "// Только Тишь имеет доступ к тулам грануляции",
+      "permission": {
+        "granulate_output": "allow",
+        "code_index": "allow",
+        "code_diff": "allow",
+        "code_graph": "allow",
+        "dependency_analyzer": "allow"
+      }
+    }
+  }
+}

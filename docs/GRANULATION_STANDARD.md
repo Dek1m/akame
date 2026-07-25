@@ -187,6 +187,12 @@ memory_search(query="entity_type: class project_id: akame", namespace="code_know
 
 # Найти по связям
 memory_search(query="depends_on MCPClient", namespace="code_knowledge")
+
+# Посмотреть последние записи (как альтернатива поиску)
+memory_recent(namespace="dialogue_insights", limit=10)
+
+# Посмотреть записи за сегодня
+memory_recent(since="2026-07-25")
 ```
 
 ## 8. Инструмент granulate_output

@@ -11,6 +11,7 @@ export interface GranulateContext {
   projectId: string;
   messages: { id: string; role: string; content: string }[];
   participants: string[];
+  mode?: "dialogue" | "code_diff" | "tool_result";
 }
 
 // ── Чтение промпта для грануляции ──
@@ -72,6 +73,16 @@ export async function granulate(
       return;
     }
 
+    // Пропускаем слишком короткие диалоги — нечего гранулировать
+    // Для code_diff и tool_result это не актуально (одно сообщение = diff)
+    const MIN_MESSAGES = 3;
+    if (!context.mode && messages.length < MIN_MESSAGES) {
+      log.debug(
+        `Слишком мало сообщений для грануляции: ${messages.length} < ${MIN_MESSAGES}`
+      );
+      return;
+    }
+
     // Сохраняем данные сессии для тула granulate_output (с projectId)
     storeSessionData(context.sessionId, {
       messages,
@@ -80,17 +91,18 @@ export async function granulate(
     });
 
     const systemPrompt = getSystemPrompt();
-    const userPrompt = `Проанализируй диалог и извлеки гранулы знаний.
+    let userPrompt: string;
 
-ID сессии: ${context.sessionId}
-Агент: ${context.agent}
-Проект: ${context.projectId}
-Участники: ${context.participants.join(", ")}
-
-Сообщения диалога:
-${messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
-
-Используй инструмент granulate_output для сохранения результатов анализа.`;
+    switch (context.mode) {
+      case "code_diff":
+        userPrompt = buildCodeDiffPrompt(context);
+        break;
+      case "tool_result":
+        userPrompt = buildToolResultPrompt(context);
+        break;
+      default:
+        userPrompt = buildDialoguePrompt(context);
+    }
 
     const result = await callLLM(input, systemPrompt, userPrompt, log);
 
@@ -186,4 +198,58 @@ function truncateMessages(
 ): GranulateContext["messages"] {
   if (messages.length <= max) return messages;
   return messages.slice(-max);
+}
+
+// ── Билдеры промптов для разных режимов ──
+
+function buildDialoguePrompt(context: GranulateContext): string {
+  return `Проанализируй диалог и извлеки гранулы знаний.
+
+ID сессии: ${context.sessionId}
+Агент: ${context.agent}
+Проект: ${context.projectId}
+Участники: ${context.participants.join(", ")}
+
+Сообщения диалога:
+${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
+
+Используй инструмент granulate_output для сохранения результатов анализа.`;
+}
+
+function buildCodeDiffPrompt(context: GranulateContext): string {
+  return `Проанализируй изменения в коде (diff) и создай code_knowledge гранулы.
+
+ID сессии: ${context.sessionId}
+Проект: ${context.projectId}
+
+Изменения (diff):
+${context.messages.map((m) => m.content).join("\n\n")}
+
+Создай гранулы с:
+- namespace: "code_knowledge"
+- entity_type: "change" (или "function", "class", "module" — по контексту)
+- module_path: путь к изменённому файлу
+- entity_name: имя изменённой сущности
+- links: связи с существующими гранулами, если известны
+
+Если изменения архитектурно значимые — добавь гранулу в namespace "project_meta".
+
+Используй инструмент granulate_output для сохранения результатов.`;
+}
+
+function buildToolResultPrompt(context: GranulateContext): string {
+  return `Проанализируй результат выполнения инструментов (git) и создай code_knowledge гранулы.
+
+ID сессии: ${context.sessionId}
+Проект: ${context.projectId}
+
+Результаты операций:
+${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
+
+Создай гранулы с:
+- namespace: "code_knowledge"
+- entity_type: "change"
+- links типа "follows" и "references" где применимо
+
+Используй инструмент granulate_output для сохранения результатов.`;
 }
