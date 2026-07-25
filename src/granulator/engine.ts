@@ -4,6 +4,7 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 import { storeSessionData } from "./granulate-tool.js";
+import { enrichLinks } from "./link-enricher.js";
 
 export interface GranulateContext {
   sessionId: string;
@@ -108,6 +109,17 @@ export async function granulate(
 
     const duration = Date.now() - startTime;
     log.info(`Грануляция завершена за ${duration}ms: ${result}`);
+
+    // Пост-обработка: автоматическое cross-namespace связывание
+    if (config.enrichLinks) {
+      try {
+        await enrichLinks(context, config, log);
+      } catch (linkErr) {
+        log.debug(
+          `enrichLinks ошибка: ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`
+        );
+      }
+    }
   } catch (err) {
     const duration = Date.now() - startTime;
     log.error(

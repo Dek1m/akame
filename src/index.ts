@@ -18,6 +18,8 @@ import { createCodeIndexTool } from "./tools/code-index-tool.js";
 import { createCodeDiffTool } from "./tools/code-diff-tool.js";
 import { createCodeGraphTool } from "./tools/code-graph-tool.js";
 import { createDependencyAnalyzerTool } from "./tools/dependency-analyzer-tool.js";
+import { createMigrateLegacyGranulesTool } from "./tools/migrate-legacy-granules-tool.js";
+import { createGraphHealthTool } from "./tools/graph-health-tool.js";
 
 const akamePlugin: Plugin = async (
   input: PluginInput,
@@ -34,6 +36,8 @@ const akamePlugin: Plugin = async (
   const codeDiffTool = createCodeDiffTool(config, log);
   const codeGraphTool = createCodeGraphTool(config, log);
   const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log);
+  const migrateLegacyGranulesTool = createMigrateLegacyGranulesTool(config, log);
+  const graphHealthTool = createGraphHealthTool(config, log);
 
   return {
     dispose: async () => {
@@ -115,6 +119,8 @@ const akamePlugin: Plugin = async (
       code_diff: codeDiffTool,
       code_graph: codeGraphTool,
       dependency_analyzer: dependencyAnalyzerTool,
+      migrate_legacy_granules: migrateLegacyGranulesTool,
+      graph_health: graphHealthTool,
     },
   };
 };

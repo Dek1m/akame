@@ -29,6 +29,7 @@ export const DEFAULTS = {
   DEBOUNCE_MS: 2000,
   MAX_BATCH: 20,
   MAX_MESSAGES: 50,
+  ENRICH_LINKS: false,
 } as const;
 
 // ── Типы конфигурации плагина ──
@@ -48,4 +49,5 @@ export interface AkameConfig {
   debounceMs: number;
   maxBatch: number;
   maxMessages: number;
+  enrichLinks: boolean;
 }
