@@ -63,6 +63,7 @@ export function createGranulateTool(
               "project_meta",
               "dialogue_insights",
               "code_knowledge",
+              "infrastructure",
             ] as const),
             importance: tool.schema
               .number()
@@ -125,6 +126,8 @@ export function createGranulateTool(
                     "related_to", "contradicts", "solves", "tested_by",
                     "implements_adr", "references", "follows", "precedes",
                     "alternative_to", "causes", "prevents",
+                    "runs_on", "exposes", "mounts",
+                    "derived_from", "motivates", "informs", "informed_by", "connected_to",
                   ] as const),
                   target: tool.schema
                     .string()

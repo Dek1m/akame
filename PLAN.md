@@ -1,54 +1,71 @@
 # Akame — OpenCode Plugin for Memory Granulation
 
 > **Akame** — opencode-плагин на TypeScript для автоматической грануляции диалогов и кода
-> в athena-memory (selti). Реагирует на события opencode, анализирует контекст через LLM
+> в athena-memory. Реагирует на события opencode, анализирует контекст через LLM
 > с промптом агента **Тишь** (memory-granulator) и сохраняет структурированные гранулы
 > в семантическую память.
 
 ---
 
-## Команда
+## Статус проекта
 
-| Роль | Имя | Возраст | Специализация |
-|------|-----|---------|---------------|
-| Team Lead | **Афина** | 18 | Архитектура, координация |
-| Planner | **Момо** | 23 | Декомпозиция, планирование |
-| Architect | **Эна** | 21 | Высокоуровневая архитектура |
-| Programmer | **Сона** | 30 | TypeScript, реализация |
-| Tester | **Катерина** | 24 | Тестирование, качество |
-| DB Architect | **Нора** | 30 | Схемы данных, миграции |
-| DevOps | **Рэй** | 23 | CI/CD, деплой, инфраструктура |
-| Security | **Лита** | 23 | Аудит безопасности |
-| Tech Writer | **Тиамат** | 26 | Документация |
-| Observability | **Мая** | 25 | Мониторинг, метрики |
-| Networks | **Кира** | 27 | Сети, DNS, фаерволы |
-| **Memory-Granulator** | **Тишь** | 19 | Грануляция знаний, промпты |
+| Параметр | Значение |
+|---|---|
+| **Версия** | 0.0.1 |
+| **Статус** | Активно разрабатывается |
+| **Язык** | TypeScript (ESNext, NodeNext, strict) |
+| **Runtime** | Bun (встроен в opencode) |
+| **Модель Тиши** | `opencode-go/deepseek-v4-flash` |
+| **Тесты** | 88 тестов, 8 файлов — все зелёные |
+| **Гранулы athena-memory** | 702 (code_knowledge: 408, project_meta: 162, dialogue_insights: 78, user_facts: 54, infrastructure: 0) |
+| **Cross-namespace связи** | 137 |
+| **Сироты** | 400 (56.9%) |
+| **Связность по namespace** | code_knowledge 48%, dialogue_insights 44%, project_meta 35%, user_facts 30% → 72% (после ретроспективной линковки) |
+| **Деплой** | `~/.config/opencode/plugins/akame/` → Docker-контейнер opencode на `ai.atom.ui` |
 
 ---
 
-## Архитектура
+## Архитектура (актуальная на 25.07.2026)
 
 ### Высокоуровневая схема
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  opencode (Bun/Node.js)                                           │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  akame plugin (.opencode/plugins/akame/)                   │    │
-│  │                                                            │    │
-│  │  События:                         Обработчики:             │    │
-│  │  session.idle ──────────────────> session-handler.ts       │    │
-│  │  file.edited ────────────────────> file-handler.ts         │    │
-│  │  tool.execute.after ─────────────> tool-handler.ts         │    │
-│  │                                                            │    │
-│  │  ┌──────────┐   ┌──────────────┐   ┌──────────────────┐   │    │
-│  │  │collector │──>│  granulator  │──>│  memory-client   │   │    │
-│  │  │.ts       │   │  .ts         │   │  .ts             │   │    │
-│  │  └──────────┘   │  (LLM via    │   │  (HTTP MCP)      │   │    │
-│  │                 │   SDK)       │   └───────┬──────────┘   │    │
-│  │                 └──────────────┘           │              │    │
-│  └────────────────────────────────────────────┼──────────────┘    │
-└───────────────────────────────────────────────┼───────────────────┘
+│  opencode (Bun) на ai.atom.ui                                     │
+│  ┌──────────────────────────────────────────────────────────────┐ │
+│  │  akame plugin (~/.config/opencode/plugins/akame/)             │ │
+│  │                                                                │ │
+│  │  7 событий:                      3 хука:                      │ │
+│  │  session.idle ──────────────────> session-handler.ts           │ │
+│  │  session.compacted ─────────────> session-handler.ts           │ │
+│  │  session.diff ──────────────────> session-handler.ts           │ │
+│  │  file.edited ───────────────────> file-handler.ts              │ │
+│  │  file.watcher.updated ──────────> file-handler.ts              │ │
+│  │  command.executed ──────────────> tool-handler.ts              │ │
+│  │  + tool.execute.after ──────────> tool-handler.ts              │ │
+│  │  + tool.execute.before ─────────> tool-handler.ts              │ │
+│  │                                                                │ │
+│  │  7 кастомных тулов:                                           │ │
+│  │  granulate_output  (Тишь)                                     │ │
+│  │  code_index        (Тишь)                                     │ │
+│  │  code_diff         (Тишь)                                     │ │
+│  │  code_graph        (Тишь)                                     │ │
+│  │  dependency_analyzer (Тишь)                                   │ │
+│  │  migrate_legacy_granules (Тишь)                               │ │
+│  │  graph_health      (Тишь)                                     │ │
+│  │                                                                │ │
+│  │  ┌──────────┐   ┌──────────────┐   ┌──────────────────┐      │ │
+│  │  │ engine.ts │──>│  granulator  │──>│  MCPClient.ts    │      │ │
+│  │  │(3 режима) │   │  (LLM via    │   │  (HTTP MCP)      │      │ │
+│  │  │дедупликац.│   │   SDK)       │   └───────┬──────────┘      │ │
+│  │  └──────────┘   └──────────────┘           │                  │ │
+│  │  ┌──────────────────────┐                   │                  │ │
+│  │  │ link-enricher.ts     │                   │                  │ │
+│  │  │ (enrichLinks —       │                   │                  │ │
+│  │  │  CNLM + auto-link)   │                   │                  │ │
+│  │  └──────────────────────┘                   │                  │ │
+│  └────────────────────────────────────────────┼──────────────────┘ │
+└───────────────────────────────────────────────┼────────────────────┘
                                                  │ JSON-RPC over HTTP
                                                  ▼
                               ┌──────────────────────────────────────┐
@@ -58,372 +75,342 @@
                               └──────────────────────────────────────┘
 ```
 
-### Ключевые решения
+### Ключевые компоненты
 
-1. **Реактивный подход** — без polling, только события opencode
-2. **LLM через SDK** — вызов через `client.session.prompt()` с `format: json_schema`
-3. **Промпт из файла** — читается из `~/.config/opencode/agents/memory-granulator.md`
-4. **Fire-and-forget** — все операции асинхронные, не блокируют opencode
-5. **HTTP MCP** — прямая отправка гранул в athena-memory через JSON-RPC
+| Компонент | Описание |
+|---|---|
+| **engine.ts** | Ядро грануляции: 3 режима (dialogue / code_diff / tool_result), дедупликация idle/compacted, вызов LLM |
+| **schema.ts** | JSON Schema + TS-типы, CNLM-матрица (5 namespace), 24 LinkType, валидация гранул |
+| **link-enricher.ts** | Пост-обработка: enrichLinks — поиск похожих гранул через `memory_find_similar`, автосвязывание через CNLM |
+| **fetchRelevantGranules** | Обогащение промпта Тиши релевантными гранулами из других namespace (Tier 2 auto-linker) |
+| **code-index.ts** | Сканер: извлекает классы/функции/интерфейсы из TS/Python файлов, создаёт code_knowledge гранулы |
+| **git-diff.ts** | Получение реального git diff для грануляции изменений кода |
+| **MCPClient.ts** | HTTP-клиент к athena-memory: JSON-RPC, retry с exponential backoff |
 
 ---
 
-## Структура проекта
+## Выполненные фазы
+
+### Фаза 0 — Документация opencode в athena-memory [x]
+
+- [x] 0.1 Загружены 9 страниц официальной документации opencode в athena-memory
+- [x] 0.2 `/docs/plugins/`, `/docs/sdk/`, `/docs/tools/`, `/docs/permissions/`, `/docs/agents/`, `/docs/custom-tools/`, `/docs/config/`
+
+**Результат:** полное понимание Plugin API, встроенной permission system, событий и хуков.
+
+---
+
+### Фаза 1 — 5 новых триггеров + compaction hook [x]
+
+- [x] 1.1 `session.compacted` — грануляция при компакшене сессии
+- [x] 1.2 `session.diff` — грануляция изменений диалога
+- [x] 1.3 `file.watcher.updated` — отслеживание изменений файлов
+- [x] 1.4 `tool.execute.before` + `command.executed` — грануляция команд
+- [x] 1.5 `experimental.session.compacting` hook — внедрение контекста при компакшене
+
+---
+
+### Фаза 2 — Engine: 3 режима, дедупликация [x]
+
+- [x] 2.1 Три режима: `dialogue`, `code_diff`, `tool_result`
+- [x] 2.2 Убран хардкод агента — agent берётся из контекста
+- [x] 2.3 Дедупликация idle/compacted — проверка `minMessages`
+- [x] 2.4 `enrichLinks` — автосвязывание гранул через `memory_find_similar`
+
+---
+
+### Фаза 3 — File-handler с грануляцией diff [x]
+
+- [x] 3.1 `getGitDiff()` — получение реального git diff изменённых файлов
+- [x] 3.2 Debounce (2 сек) — фильтрация по расширениям `.ts`, `.py`, `.js`
+- [x] 3.3 Грануляция в режиме `code_diff` — анализ изменений кода
+
+---
+
+### Фаза 4 — Tool-handler с грануляцией git [x]
+
+- [x] 4.1 Парсинг результатов git-команд (`git commit`, `git push`)
+- [x] 4.2 Грануляция в режиме `tool_result`
+- [x] 4.3 Фильтрация: только git-инструменты (Git, Bash с git, gh)
+
+---
+
+### Фаза 5 — 3 новых тула [x]
+
+- [x] 5.1 `code_diff` — грануляция diff (только Тишь)
+- [x] 5.2 `code_graph` — построение графа зависимостей (только Тишь)
+- [x] 5.3 `dependency_analyzer` — анализ импортов модулей (только Тишь)
+- [x] 5.4 Все тулы с защитой `context.agent === 'memory-granulator'`
+
+---
+
+### Фаза 6 — Permission system [x]
+
+- [x] 6.1 `opencode.json.example` с deny/allow правилами
+- [x] 6.2 Двухуровневая защита: opencode.json + in-code `context.agent`
+- [x] 6.3 Все 7 тулов доступны только агенту `memory-granulator`
+
+---
+
+### Фаза 7 — Compaction hook [x]
+
+- [x] 7.1 `experimental.session.compacting` — внедрение промпта грануляции
+- [x] 7.2 Базовый контекст в `output.context[]`
+
+---
+
+### Фаза 8 — Тесты и TypeScript [x]
+
+- [x] 8.1 TypeScript strict — `npx tsc --noEmit` без ошибок
+- [x] 8.2 88 тестов, все зелёные
+- [x] 8.3 8 тестовых файлов: config, schema, engine, client, session-handler, file-handler, tool-handler, code-index
+
+---
+
+### Фаза 9 — Миграция legacy гранул [x]
+
+- [x] 9.1 `migrate_legacy_granules` — тул миграции старых гранул в новый формат
+- [x] 9.2 Поддержка `--dry-run` для предпросмотра
+- [x] 9.3 Извлечение `entity_type`, `entity_name`, `module_path` из контента
+
+---
+
+### Фаза 10 — Cross-namespace граф [x]
+
+- [x] 10.1 `link-enricher.ts` — пост-обработка с автосвязыванием гранул
+- [x] 10.2 `graph_health` — тул проверки здоровья графа (сироты, дубликаты, циклы)
+- [x] 10.3 CNLM-матрица (Cross-Namespace Link Matrix) — 5 namespace, разрешённые LinkType для каждой пары
+- [x] 10.4 3 новых LinkType: `derived_from`, `motivates`, `informed_by`
+
+---
+
+### Фаза 11 — enrichLinks + fetchRelevantGranules [x]
+
+- [x] 11.1 `enrichLinks` (фича-флаг, default: true) — автосвязывание после грануляции
+- [x] 11.2 `fetchRelevantGranules()` — обогащение промпта Тиши релевантными гранулами
+- [x] 11.3 `extractKeywords()` — извлечение ключевых слов для семантического поиска
+- [x] 11.4 `enrichPrompt` (фича-флаг, default: true) — внедрение контекста в промпт
+
+---
+
+### Фаза 12 — Инфраструктурная каталогизация [x]
+
+- [x] 12.1 Namespace `infrastructure` в `schema.ts` (entity_type: server, container, service, api, network, volume, os)
+- [x] 12.2 10 инфраструктурных гранул о `ai.atom.ui` (сервер, контейнеры, сети, API)
+- [x] 12.3 Временно сохранены в `project_meta` — namespace `infrastructure` не зарегистрирован в backend athena-memory
+- [x] 12.4 CNLM-матрица расширена до 5 namespace (включая infrastructure)
+
+---
+
+## Текущие задачи (НЕ выполнены)
+
+По результатам аудита кодовой базы от 25.07.2026 выявлено 15 проблем.
+
+### Волна 1 — Критические (P0)
+
+- [ ] **Добавить `infrastructure` в enum granulate-tool** — namespace объявлен в `schema.ts`, но отсутствует в рантайм-валидации `granulate-tool`. Сона уже исправила.
+- [ ] **Добавить 8 LinkType в granulate-tool** — `runs_on`, `exposes`, `mounts`, `derived_from`, `motivates`, `informs`, `informed_by`, `connected_to` не в enum. Сона уже исправила.
+- [ ] **Написать тесты для 9 модулей (2544 строки)** — 224 тест-кейса для: index.ts, logger.ts, granulate-tool.ts, code-diff-tool.ts, code-graph-tool.ts, dependency-analyzer-tool.ts, migrate-legacy-granules-tool.ts, graph-health-tool.ts, link-enricher.ts
+
+### Волна 2 — Безопасность (P1)
+
+- [ ] **Shell-инжекция:** `execSync` → `spawnSync` в `git-diff.ts`
+- [ ] **Path traversal:** `resolveSafePath()` для `code-index` и `dependency-analyzer`
+- [ ] **Агентская защита в `code-index-tool`** — единственный exclusive tool без `context.agent` проверки
+- [ ] **8 молчаливых `catch` → `log.debug()`** — подавленные ошибки без логирования
+- [ ] **Тройное дублирование `GranulateContext` → `buildGranulateContext()`** — в engine.ts, file-handler.ts, tool-handler.ts
+- [ ] **Документация: 7 недокументированных env vars** — добавить в `.env.example`: `ENRICH_LINKS`, `ENRICH_PROMPT` и 5 новых триггеров
+- [ ] **Актуализация документации:** `CONFIGURATION.md`, `README.md`, `ARCHITECTURE.md`
+
+### Волна 3 — Качество (P2-P3)
+
+- [ ] **Контекст в сообщениях ошибок** — все `throw new Error(...)` без контекста
+- [ ] **Кеш чтения промпта** — `readPromptFromFile()` вызывается при каждой грануляции без кеша
+- [ ] **Вынос общих констант** — `EXCLUDE_DIRS`, `SOURCE_EXTS` дублируются в 3 модулях
+- [ ] **Синглтон MCPClient** — создаётся заново в каждом обработчике вместо переиспользования
+
+### Стратегия выполнения
+
+| Волна | Приоритет | Оценка | Стратегия |
+|---|---|---|---|
+| Волна 1 | P0 | ~1 час | Один коммит — независимые файлы |
+| Волна 2 | P1 | ~1.5 часа | Второй коммит |
+| Волна 3 (тесты) | P0 | 4-6 часов | Отдельные PR по 2-3 модуля |
+| Волна 3 (качество) | P2-P3 | ~1 час | Третий коммит |
+
+**Итого:** ~2.5 часа на исправления + 4-6 часов на тесты.
+
+---
+
+## Процесс перезапуска opencode
+
+После изменения кода плагина необходимо пересобрать и перезапустить opencode на сервере `ai.atom.ui`:
+
+```bash
+# 1. Сборка плагина
+cd /home/opencode/projects/akame && npm run build
+
+# 2. Копирование в директорию плагинов opencode
+cp -r dist/* /home/opencode/.config/opencode/plugins/akame/
+
+# 3. Перезапуск Docker-контейнера opencode на сервере
+ssh -i ~/.config/opencode/.ssh/svc_athene_ai@atom.ui.key svc_athene_ai@ai.atom.ui "docker restart opencode"
+```
+
+---
+
+## Актуальная структура проекта (20+ файлов)
 
 ```
-.opencode/plugins/akame/
-├── package.json                    # name: akame, type: module
-├── tsconfig.json                   # ESNext, NodeNext
+akame/
+├── package.json                         # name: akame, type: module
+├── tsconfig.json                        # ESNext, NodeNext, strict
+├── opencode.json.example                # Permission rules (deny/allow)
+├── .env.example                         # 16 из 18 переменных окружения
+├── vitest.config.ts
+│
 ├── src/
-│   ├── index.ts                    # Точка входа — Plugin function
-│   ├── config.ts                   # Чтение env, дефолты
-│   ├── logger.ts                   # Логирование через client.app.log
-│   ├── constants.ts                # Типы, namespace-ы, дефолты
+│   ├── index.ts                         # Точка входа — Plugin function.
+│   │                                    #   Регистрирует 7 событий, 3 хука, 7 тулов.
+│   │
+│   ├── config.ts                        # Чтение env (AKAME_*), AkameConfig
+│   ├── constants.ts                     # 5 namespace, DEFAULTS, AkameConfig interface
+│   │                                    #   ENRICH_LINKS=true, ENRICH_PROMPT=true
+│   ├── logger.ts                        # Логирование через client.app.log
+│   │
 │   ├── events/
-│   │   ├── session-handler.ts      # session.idle → грануляция
-│   │   ├── file-handler.ts         # file.edited → debounce → грануляция
-│   │   └── tool-handler.ts         # tool.execute.after (git) → грануляция
+│   │   ├── session-handler.ts           # session.idle, .compacted, .diff →
+│   │   │                                #   granulate(mode: 'dialogue')
+│   │   ├── file-handler.ts              # file.edited, file.watcher.updated →
+│   │   │                                #   getGitDiff() → granulate(mode: 'code_diff')
+│   │   ├── tool-handler.ts              # tool.execute.after, .before,
+│   │   │                                #   command.executed → грануляция git-результатов
+│   │   └── git-diff.ts                  # execSync('git diff ...') — получение diff
+│   │                                    #   [P1: shell-инжекция, заменить на spawnSync]
+│   │
 │   ├── granulator/
-│   │   ├── engine.ts               # Сбор → LLM → парсинг → гранулы
-│   │   └── schema.ts               # JSON Schema + TS-типы + валидация
-│   └── mcp/
-│       └── client.ts               # HTTP-клиент к athena-memory
-├── tests/
+│   │   ├── engine.ts                    # Ядро: 3 режима (dialogue/code_diff/tool_result),
+│   │   │                                #   дедупликация, enrichLinks,
+│   │   │                                #   fetchRelevantGranules, вызов LLM
+│   │   ├── schema.ts                    # JSON Schema, Granule, LinkType (24 типа),
+│   │   │                                #   CNLM-матрица (5 namespace), validateGranules()
+│   │   ├── granulate-tool.ts            # granulate_output — ручная грануляция (только Тишь)
+│   │   └── link-enricher.ts             # enrichLinks: memory_find_similar →
+│   │                                    #   автосвязывание через CNLM (threshold ≥0.75)
+│   │
 │   ├── mcp/
-│   │   └── client.test.ts
+│   │   └── client.ts                    # MCPClient — HTTP JSON-RPC к athena-memory.
+│   │                                    #   Методы: memory_search, memory_ingest_batch и др.
+│   │                                    #   Retry с exponential backoff (500ms→1s→2s).
+│   │
+│   ├── scanner/
+│   │   └── code-index.ts                # Сканер .ts/.py файлов:
+│   │                                    #   scanProject(), parseTSFile(), parsePythonFile()
+│   │                                    #   → code_knowledge гранулы с дедупликацией
+│   │
+│   └── tools/
+│       ├── code-index-tool.ts           # code_index — обёртка над scanner (только Тишь)
+│       │                                #   [P1: нет агентской защиты]
+│       ├── code-diff-tool.ts            # code_diff — грануляция diff (только Тишь)
+│       ├── code-graph-tool.ts           # code_graph — граф зависимостей (только Тишь)
+│       ├── dependency-analyzer-tool.ts  # dependency_analyzer — импорты (только Тишь)
+│       ├── migrate-legacy-granules-tool.ts  # migrate_legacy_granules (только Тишь)
+│       └── graph-health-tool.ts         # graph_health — сироты, дубликаты (только Тишь)
+│
+├── tests/
+│   ├── config.test.ts                   # 3 теста, 100% покрытие
+│   ├── events/
+│   │   ├── session-handler.test.ts      # 8 тестов
+│   │   ├── file-handler.test.ts         # 12 тестов
+│   │   └── tool-handler.test.ts         # 3 теста
 │   ├── granulator/
-│   │   └── engine.test.ts
-│   └── events/
-│       ├── session-handler.test.ts
-│       ├── file-handler.test.ts
-│       └── tool-handler.test.ts
+│   │   ├── schema.test.ts              # 14 тестов, ~100% покрытие
+│   │   └── engine.test.ts              # 3 теста (только успешный path)
+│   ├── mcp/
+│   │   └── client.test.ts              # 9 тестов, ~100% покрытие
+│   └── scanner/
+│       └── code-index.test.ts           # покрытие code-index
+│
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   └── CONFIGURATION.md
-└── README.md
+│   ├── ARCHITECTURE.md                  # [требует актуализации]
+│   ├── CONFIGURATION.md                 # [требует актуализации]
+│   ├── GRANULATION.md                   # Правила грануляции
+│   ├── GRANULATION_STANDARD.md          # Полный стандарт грануляции (сущности, связи)
+│   └── PLAN_CODE_INDEX.md               # План code_index
+│
+└── README.md                            # [требует актуализации]
 ```
 
 ---
 
-## Фазы реализации
+## 5 Namespace в athena-memory
 
-### Фаза 0 — Init (скелет проекта)
+| Namespace | Гранул | Связность | Назначение |
+|---|---|---|---|
+| `code_knowledge` | 408 | 48% | Код: модули, классы, функции, архитектура, изменения |
+| `project_meta` | 162 | 35% | Архитектурные решения, ADR, риски, статусы |
+| `dialogue_insights` | 78 | 44% | Инсайты, договорённости, выводы, контекст диалогов |
+| `user_facts` | 54 | 30% → **72%** | Факты о пользователях, предпочтения, навыки |
+| `infrastructure` | 0 | — | Серверы, контейнеры, сети, API (ждёт регистрации в backend) |
 
-**Задачи:**
-- [ ] 0.1 Создать `package.json` с зависимостями: `@opencode-ai/plugin`, `@opencode-ai/sdk`
-- [ ] 0.2 Создать `tsconfig.json` (ESNext, NodeNext, strict)
-- [ ] 0.3 Создать `src/index.ts` — точка входа, экспорт Plugin function
-- [ ] 0.4 Создать `src/config.ts` — чтение переменных `AKAME_*`
-- [ ] 0.5 Создать `src/constants.ts` — namespace-ы, дефолты, типы
-- [ ] 0.6 Создать `src/logger.ts` — логгер через `client.app.log`
+### CNLM-матрица (Cross-Namespace Link Matrix)
 
-**Кто:** Сона + Рэй
-**Сложность:** S
-**Зависимости:** —
+Определяет разрешённые LinkType для каждой пары namespace. Примеры:
 
----
-
-### Фаза 1 — MCP клиент
-
-**Задачи:**
-- [ ] 1.1 Реализовать `src/mcp/client.ts` — HTTP POST к `/mcp/` с JSON-RPC
-- [ ] 1.2 Метод `ingestBatch(entries, userId)` — вызов `memory_ingest_batch`
-- [ ] 1.3 Retry с exponential backoff (500ms → 1s → 2s)
-- [ ] 1.4 Обработка ошибок: 4xx → не retry, 5xx → retry, таймаут
-- [ ] 1.5 Unit-тесты MCP клиента (Mock HTTP через MockAgent/undici)
-
-**Кто:** Сона + Катерина
-**Сложность:** M
-**Зависимости:** Фаза 0
-
----
-
-### Фаза 2 — Схема грануляции (Тишь)
-
-**Задачи:**
-- [ ] 2.1 Создать `src/granulator/schema.ts`:
-  - Интерфейс `Granule` (content, namespace, metadata, importance)
-  - Интерфейс `GranulatorOutput` (summary, granules[])
-  - JSON Schema для structured output LLM
-  - Функция `validateGranules()` — валидация ответа LLM
-- [ ] 2.2 Создать TS-типы для namespace-ов и metadata
-- [ ] 2.3 Написать тесты валидации (schema.test.ts)
-- [ ] 2.4 Задокументировать правила грануляции в `docs/GRANULATION.md`
-
-**Кто:** Тишь (схема) + Сона (код) + Катерина (тесты)
-**Сложность:** S
-**Зависимости:** Фаза 0
-
----
-
-### Фаза 3 — Granulator Engine (ядро)
-
-**Задачи:**
-- [ ] 3.1 Реализовать `src/granulator/engine.ts`:
-  - Функция `granulate(client, context, config, log) → Granule[]`
-  - Чтение промпта Тиши из файла `~/.config/opencode/agents/memory-granulator.md`
-  - Формирование payload: system prompt + данные диалога
-  - Вызов LLM через `client.session.prompt()` с `format: json_schema`
-  - Парсинг JSON-ответа (с запасом — снимает ```json блоки)
-  - Валидация через `validateGranules()`
-  - Graceful degradation при ошибках
-- [ ] 3.2 Обработка длинных диалогов (truncation до N сообщений)
-- [ ] 3.3 Unit-тесты Granulator Engine (mock SDK)
-
-**Кто:** Сона + Катерина
-**Сложность:** M
-**Зависимости:** Фаза 1, Фаза 2
-
----
-
-### Фаза 4 — Event Handlers
-
-**Задачи:**
-- [ ] 4.1 `src/events/session-handler.ts`:
-  - Обработка `session.idle`
-  - Cooldown (30 сек между грануляциями одной сессии)
-  - Сбор сообщений через `client.session.messages()`
-  - Сбор дочерних сессий через `client.session.children()`
-- [ ] 4.2 `src/events/file-handler.ts`:
-  - Обработка `file.edited`
-  - Debounce (2 сек после последнего изменения)
-  - Фильтр по расширениям (только код и конфиги)
-- [ ] 4.3 `src/events/tool-handler.ts`:
-  - Обработка `tool.execute.after`
-  - Фильтр только git-инструментов (Git, Bash, gh)
-  - Извлечение toolOutput
-- [ ] 4.4 Интеграция в `src/index.ts` — подключение всех обработчиков в Hooks
-- [ ] 4.5 Unit-тесты каждого обработчика
-
-**Кто:** Сона + Катерина
-**Сложность:** M
-**Зависимости:** Фаза 3
-
----
-
-### Фаза 5 — Integration & E2E
-
-**Задачи:**
-- [ ] 5.1 Интеграционные тесты: событие → грануляция → MCP (с моками)
-- [ ] 5.2 Тесты debounce/cooldown (через fake timers)
-- [ ] 5.3 Тесты на длинные диалоги (>50 сообщений)
-- [ ] 5.4 Тесты на невалидные ответы LLM
-- [ ] 5.5 Создать `test-utils/runtime.ts` — хелпер для тестового раннера opencode
-
-**Кто:** Катерина + Сона
-**Сложность:** M
-**Зависимости:** Фаза 4
-
----
-
-### Фаза 6 — CI/CD
-
-**Задачи:**
-- [ ] 6.1 Создать `.github/workflows/ci.yml`:
-  - Линтер (biome/tsc)
-  - Сборка (`tsc`)
-  - Тесты (`vitest run --coverage`)
-  - Публикация в npm при push тега `v*`
-- [ ] 6.2 `.env.example` — документировать переменные
-- [ ] 6.3 `.gitignore` — dist, node_modules, .env
-- [ ] 6.4 `.npmignore` — исключить src/, тесты
-
-**Кто:** Рэй
-**Сложность:** S
-**Зависимости:** Фаза 0, Фаза 5
-
----
-
-### Фаза 7 — Документация
-
-**Задачи:**
-- [ ] 7.1 `README.md`:
-  - Что такое akame
-  - Архитектура (схема)
-  - Установка (локально + npm)
-  - Настройка (переменные окружения)
-  - Использование
-  - Структура проекта
-- [ ] 7.2 `docs/ARCHITECTURE.md` — полное описание архитектуры
-- [ ] 7.3 `docs/CONFIGURATION.md` — все настройки и переменные
-- [ ] 7.4 `docs/GRANULATION.md` — правила грануляции от Тиши
-
-**Кто:** Тиамат
-**Сложность:** S
-**Зависимости:** Фаза 0-6
-
----
-
-### Фаза 8 — Публикация и деплой
-
-**Задачи:**
-- [ ] 8.1 Собрать пакет (`npm run build`)
-- [ ] 8.2 Опубликовать в npm (`npm publish`)
-- [ ] 8.3 Подключить в opencode.json через `file://` (локально)
-- [ ] 8.4 Настроить в `opencode.json` плагин akame
-- [ ] 8.5 Проверить интеграцию с athena-memory
-- [ ] 8.6 Написать healthcheck-команду `/akame:health`
-
-**Кто:** Рэй + Сона
-**Сложность:** S
-**Зависимости:** Фаза 6, Фаза 7
-
----
-
-## Схема грануляции (от Тиши)
-
-### Namespace и их назначение
-
-| Namespace | Когда создаём | Что пишем в content |
+| Источник | Цель | Разрешённые LinkType |
 |---|---|---|
-| `project_meta` | Архитектурные решения, ADR | «Принято решение использовать X для Y вместо Z, потому что...» |
-| `dialogue_insights` | Инсайты, договорённости, контекст | «Выяснено: ... Контекст: ... Влияние: ...» |
-| `code_knowledge` | Код, функции, тесты, требования | «В [файл] реализовано [что]. Требование: ...» |
-| `user_facts` | Предпочтения пользователя | «Серёжа предпочитает/не приемлет/отметил ...» |
+| `user_facts` | `dialogue_insights` | `derived_from`, `references` |
+| `user_facts` | `project_meta` | `motivates`, `references` |
+| `dialogue_insights` | `code_knowledge` | `references`, `solves` |
+| `project_meta` | `code_knowledge` | `implements_adr`, `references` |
+| `infrastructure` | `infrastructure` | `runs_on`, `contains`, `connected_to`, `exposes`, `mounts`, `depends_on`, `references` |
 
-### JSON Schema для structured output LLM
-
-```typescript
-interface Granule {
-  content: string;                    // самодостаточное описание
-  namespace: "user_facts" | "project_meta" | "dialogue_insights" | "code_knowledge";
-  importance: 1 | 2 | 3 | 4 | 5;     // 1 — мелочь, 5 — критично
-  metadata: {
-    session_id: string;
-    agent: string;
-    project_id: string;
-    title: string;                    // заголовок гранулы (до 80 символов)
-    message_ids: string[];
-    participants: string[];
-  };
-}
-
-interface GranulatorOutput {
-  summary: string;                    // о чём диалог одной строкой
-  granules: Granule[];
-}
-```
-
-### Триггеры грануляции
-
-| Событие | Что делаем | Debounce/Cooldown |
-|---|---|---|
-| `session.idle` | Весь диалог → LLM → гранулы → memory_ingest_batch | 30 сек cooldown |
-| `file.edited` | Diff файла → LLM → code_knowledge гранулы | 2 сек debounce |
-| `tool.execute.after` | git commit/push → LLM → code_knowledge | без лимита |
-
----
-
-## Пример работы
-
-### Вход (диалог Милорда и Соны):
-
-> **Серёжа:** Давай перепишем модуль авторизации на JWT, сейчас там сессии на куках — боль при масштабировании.
-> **Сона:** Хорошо. Я предлагаю использовать `jsonwebtoken` с RS256. Ключи хранить в Vault.
-> **Серёжа:** Согласен, но access token пусть живёт 15 минут, refresh — 7 дней.
-
-### Выход (гранулы в athena-memory):
-
-```json
-[
-  {
-    "content": "Сона и Серёжа приняли решение перейти с cookie-сессий на JWT (RS256) для модуля авторизации, чтобы упростить масштабирование. Ключи будут храниться в Vault.",
-    "namespace": "project_meta",
-    "importance": 5,
-    "metadata": {
-      "session_id": "sess_abc123",
-      "agent": "programmer",
-      "project_id": "/home/opencode/projects/selti",
-      "title": "Переход на JWT-авторизацию",
-      "participants": ["Серёжа", "programmer"]
-    }
-  },
-  {
-    "content": "Серёжа установил: access token — 15 минут, refresh token — 7 дней. Компромисс между безопасностью и UX.",
-    "namespace": "dialogue_insights",
-    "importance": 4,
-    "metadata": { "session_id": "sess_abc123", "title": "TTL токенов" }
-  },
-  {
-    "content": "Реализовать middleware проверки JWT в auth.middleware.ts. Проверка signature, expiry, проставление req.user.",
-    "namespace": "code_knowledge",
-    "importance": 4,
-    "metadata": { "session_id": "sess_abc123", "title": "Создать auth.middleware.ts" }
-  },
-  {
-    "content": "Серёжа предпочитает короткие access token (15 минут) с refresh-ротацией. Не любит долгоживущие сессии.",
-    "namespace": "user_facts",
-    "importance": 3,
-    "metadata": { "session_id": "sess_abc123", "title": "Серёжа предпочитает короткоживущие токены" }
-  }
-]
-```
+CNLM-валидация в `validateGranules()` — неблокирующая (`console.warn` при нарушении).
 
 ---
 
 ## Технологический стек
 
-| Компонент | Технология | Обоснование |
-|---|---|---|
-| Язык | TypeScript | Стандарт opencode, типизация, Bun-совместимость |
-| Runtime | Bun (opencode) | Встроен в opencode, быстрый import модулей |
-| Plugin API | @opencode-ai/plugin | Типы, Plugin, Hooks |
-| SDK | @opencode-ai/sdk | Клиент для LLM и API opencode |
-| Тесты | Vitest | Стандарт TS, built-in mock, fake timers |
-| HTTP моки | MockAgent (undici) | Встроен в Node.js, не требует зависимостей |
-| CI/CD | GitHub Actions | Стандарт, публ. в npm |
-| База данных | PostgreSQL + pgvector (через selti) | Уже работает в athena-memory |
+| Компонент | Технология |
+|---|---|
+| Язык | TypeScript (strict) |
+| Runtime | Bun (встроен в opencode) |
+| Plugin API | `@opencode-ai/plugin` |
+| SDK | `@opencode-ai/sdk` |
+| Тесты | Vitest (88 тестов, 8 файлов) |
+| LLM (Тишь) | `opencode-go/deepseek-v4-flash` |
+| Хранилище | PostgreSQL + pgvector + Redis (через selti) |
+| Деплой | `~/.config/opencode/plugins/akame/` → Docker на ai.atom.ui |
 
 ---
 
-## Переменные окружения
+## Ключевые архитектурные решения (ADR)
 
-| Переменная | Дефолт | Описание |
-|---|---|---|
-| `AKAME_MCP_URL` | `http://athena-memory:8000/mcp/` | URL MCP-эндпоинта |
-| `AKAME_API_KEY` | — | API-ключ athena-memory |
-| `AKAME_USER_ID` | `akame` | Владелец записей в памяти |
-| `AKAME_GRANULATE_IDLE` | `true` | Гранулировать при session.idle |
-| `AKAME_GRANULATE_FILE` | `false` | Гранулировать при file.edited |
-| `AKAME_GRANULATE_TOOL` | `true` | Гранулировать после tool.execute.after |
-| `AKAME_COOLDOWN_MS` | `30000` | Cooldown между грануляциями (мс) |
-| `AKAME_DEBOUNCE_MS` | `2000` | Debounce file.edited (мс) |
-| `AKAME_MAX_BATCH` | `20` | Макс. гранул в одном ingest_batch |
-| `AKAME_MAX_MESSAGES` | `50` | Макс. сообщений для анализа |
+- **Реактивный подход** — без polling, только события opencode
+- **LLM через SDK** — `client.session.prompt()` с `format: json_schema`
+- **Fire-and-forget** — все операции асинхронные, не блокируют opencode
+- **HTTP MCP** — прямая отправка гранул в athena-memory через JSON-RPC
+- **Permission delegation** — двухуровневая: opencode.json + in-code `context.agent`
+- **Three-tier auto-linker** — Schema (CNLM) → Prompt (fetchRelevantGranules) → Post-process (enrichLinks)
+- **Global cooldown** — 5 сек между любыми грануляциями, предотвращает лавину
+- **Singleton prevention** — `globalThis` флаг, предотвращает 20x загрузку плагина
+- **Service sessions** — отслеживаются в Set, пропускаются в обработчиках (защита от бесконечного цикла)
 
 ---
 
-## Граф зависимостей
+## История изменений
 
-```
-Фаза 0 (скелет)
-  ├── Фаза 1 (MCP клиент)
-  ├── Фаза 2 (схема грануляции)
-  │
-  ├── Фаза 3 (Granulator Engine) — зависит от 1 и 2
-  │     │
-  │     └── Фаза 4 (Event Handlers) — зависит от 3
-  │           │
-  │           └── Фаза 5 (Integration тесты) — зависит от 4
-  │
-  ├── Фаза 6 (CI/CD) — зависит от 0, 5
-  ├── Фаза 7 (Документация) — зависит от 0-6
-  └── Фаза 8 (Публикация) — зависит от 6, 7
-```
-
----
-
-## Оценка сложности
-
-| Фаза | Задач | Сложность | Кто |
-|------|-------|-----------|-----|
-| 0 — Init | 6 | S | Сона, Рэй |
-| 1 — MCP клиент | 5 | M | Сона, Катерина |
-| 2 — Схема грануляции | 4 | S | Тишь, Сона, Катерина |
-| 3 — Granulator Engine | 3 | M | Сона, Катерина |
-| 4 — Event Handlers | 5 | M | Сона, Катерина |
-| 5 — Integration тесты | 5 | M | Катерина, Сона |
-| 6 — CI/CD | 4 | S | Рэй |
-| 7 — Документация | 4 | S | Тиамат |
-| 8 — Публикация | 6 | S | Рэй, Сона |
-| **Итого** | **42** | — | — |
+| Дата | Событие |
+|---|---|
+| 2026-07-24 | Плагин загружен, базовая грануляция работает |
+| 2026-07-24 | Исправлено: бесконечный цикл, uppercase логгер, 20x загрузка, модель LLM |
+| 2026-07-24 | Commit `f3d4b34` — все 8 фаз завершены, +2003/-27 строк |
+| 2026-07-25 | Фаза 9: `migrate_legacy_granules` — миграция старых гранул |
+| 2026-07-25 | Фаза 10: `link-enricher`, `graph_health`, CNLM-матрица |
+| 2026-07-25 | Фаза 11: `enrichLinks`, `fetchRelevantGranules` |
+| 2026-07-25 | Фаза 12: namespace `infrastructure`, 10 гранул о сервере |
+| 2026-07-25 | Деплой на `ai.atom.ui` — SSH перезапуск контейнера |
+| 2026-07-25 | Ретроспективная линковка: user_facts связность 30% → 72% |
+| 2026-07-25 | Аудит: 15 проблем (2 P0, 8 P1, 4 P2, 1 P3) |
+| 2026-07-25 | Дедупликация: 50 записей помечены `is_deprecated` |
+| **2026-07-25** | **Актуальное состояние: 702 гранулы, 88 тестов, 12 фаз завершено** |
