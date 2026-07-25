@@ -35,7 +35,7 @@ export async function handleSessionIdle(
 
   const eventData = event as unknown as {
     type: "session.idle";
-    properties: { sessionID: string };
+    properties: { sessionID: string; location?: { directory?: string } };
   };
   const sessionId = eventData.properties?.sessionID;
   if (!sessionId) return;
@@ -104,10 +104,16 @@ export async function handleSessionIdle(
     const roles = new Set(messages.map((m: MessageInfo) => m.info.role));
     const participants = Array.from(roles);
 
+    // Определяем проект: берём из location события или имя пользователя
+    const eventPath = eventData.properties?.location?.directory;
+    const detectedProject = eventPath
+      ? eventPath.split("/").pop() || config.userId
+      : config.userId;
+
     const context: GranulateContext = {
       sessionId,
       agent: "team-lead",
-      projectId: "unknown",
+      projectId: detectedProject,
       messages: messages.map((m: MessageInfo) => ({
         id: m.info.id || `msg_${Date.now()}`,
         role: m.info.role,

@@ -2,6 +2,41 @@
 
 import type { Namespace } from "../constants.js";
 
+// ── Универсальный тип EntityType для ВСЕХ namespace ──
+
+export type EntityType =
+  // Для code_knowledge
+  | "module" | "class" | "interface" | "function"
+  | "sql_query" | "table" | "index"
+  | "architecture" | "dependency" | "config" | "change" | "test"
+  // Для project_meta
+  | "adr" | "decision" | "risk" | "requirement" | "status"
+  // Для user_facts
+  | "person" | "preference" | "habit" | "skill" | "pain_point" | "contact"
+  // Для dialogue_insights
+  | "insight" | "agreement" | "conclusion" | "context" | "pattern" | "question"
+  // Общее
+  | "unknown";
+
+// ── Универсальный тип LinkType ──
+
+export type LinkType =
+  // Кодовые и архитектурные
+  | "depends_on" | "used_by" | "extends" | "implements"
+  | "contains" | "contained_by" | "calls" | "called_by"
+  // Общие
+  | "related_to" | "contradicts"
+  // Семантические
+  | "solves" | "tested_by" | "implements_adr"
+  | "references" | "follows" | "precedes" | "alternative_to"
+  | "causes" | "prevents";
+
+export interface CodeLink {
+  type: LinkType;
+  target: string;
+  description?: string;
+}
+
 // ── Базовые типы ──
 
 export interface GranuleMetadata {
@@ -11,6 +46,25 @@ export interface GranuleMetadata {
   title: string; // до 80 символов
   message_ids: string[];
   participants: string[];
+
+  // Универсальные поля (опциональны, для любого namespace)
+  entity_type?: EntityType;
+  entity_name?: string;
+
+  // Поля для code_knowledge (опциональны)
+  module_path?: string;
+  signature?: string;
+  is_deprecated?: boolean;
+  source_location?: string;
+
+  // Поля для project_meta (опциональны)
+  adr_status?: "proposed" | "accepted" | "deprecated" | "superseded";
+
+  // Поля для user_facts (опциональны)
+  confidence?: number;   // 0.0 — 1.0, насколько уверены в факте
+
+  // Графовые связи
+  links?: CodeLink[];
 }
 
 export interface Granule {
@@ -24,6 +78,40 @@ export interface GranulatorOutput {
   summary: string; // о чём диалог одной строкой
   granules: Granule[];
 }
+
+// ── Полный список всех EntityType для валидации и JSON Schema ──
+
+export const ALL_ENTITY_TYPES = [
+  // code_knowledge
+  "module", "class", "interface", "function",
+  "sql_query", "table", "index",
+  "architecture", "dependency", "config", "change", "test",
+  // project_meta
+  "adr", "decision", "risk", "requirement", "status",
+  // user_facts
+  "person", "preference", "habit", "skill", "pain_point", "contact",
+  // dialogue_insights
+  "insight", "agreement", "conclusion", "context", "pattern", "question",
+  // общее
+  "unknown",
+] as const;
+
+export const ALL_LINK_TYPES = [
+  "depends_on", "used_by", "extends", "implements",
+  "contains", "contained_by", "calls", "called_by",
+  "related_to", "contradicts",
+  "solves", "tested_by", "implements_adr",
+  "references", "follows", "precedes", "alternative_to",
+  "causes", "prevents",
+] as const;
+
+// Рекомендации по entity_type для каждого namespace
+export const ENTITY_TYPE_BY_NAMESPACE: Record<string, string[]> = {
+  code_knowledge: ["module", "class", "interface", "function", "sql_query", "table", "index", "architecture", "dependency", "config", "change", "test"],
+  project_meta: ["adr", "decision", "architecture", "risk", "requirement", "status", "config"],
+  user_facts: ["person", "preference", "habit", "skill", "pain_point", "contact"],
+  dialogue_insights: ["insight", "agreement", "conclusion", "context", "pattern", "question"],
+};
 
 // ── JSON Schema для LLM structured output ──
 
@@ -73,7 +161,7 @@ export const GRANULATOR_JSON_SCHEMA = {
               },
               project_id: {
                 type: "string",
-                description: "ID проекта",
+                description: "ID проекта или контекста",
               },
               title: {
                 type: "string",
@@ -90,6 +178,69 @@ export const GRANULATOR_JSON_SCHEMA = {
                 items: { type: "string" },
                 description: "Участники диалога",
               },
+              // Универсальные поля для любого namespace
+              entity_type: {
+                type: "string",
+                enum: [...ALL_ENTITY_TYPES],
+                description: "Тип сущности. Рекомендуемый набор по namespace: code_knowledge → module/class/interface/function/sql_query/table/architecture, project_meta → adr/decision/architecture/risk, user_facts → person/preference/habit/skill/pain, dialogue_insights → insight/agreement/conclusion/context/pattern",
+              },
+              entity_name: {
+                type: "string",
+                description: "Имя сущности (класса, функции, ADR, человека, паттерна)",
+              },
+              // Для code_knowledge
+              module_path: {
+                type: "string",
+                description: "Путь к файлу от корня проекта (для кода)",
+              },
+              signature: {
+                type: "string",
+                description: "Сигнатура функции/класса (для кода)",
+              },
+              is_deprecated: {
+                type: "boolean",
+                description: "true если информация устарела",
+              },
+              source_location: {
+                type: "string",
+                description: "Локация в коде, например L42",
+              },
+              // Для project_meta
+              adr_status: {
+                type: "string",
+                enum: ["proposed", "accepted", "deprecated", "superseded"],
+                description: "Статус ADR (для project_meta)",
+              },
+              // Для user_facts
+              confidence: {
+                type: "number",
+                minimum: 0,
+                maximum: 1,
+                description: "Уверенность в факте 0.0–1.0 (для user_facts)",
+              },
+              // Графовые связи
+              links: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: [...ALL_LINK_TYPES],
+                    },
+                    target: {
+                      type: "string",
+                      description: "ID или имя связанной гранулы",
+                    },
+                    description: {
+                      type: "string",
+                      description: "Пояснение связи",
+                    },
+                  },
+                  required: ["type", "target"],
+                },
+                description: "Связи с другими гранулами (граф знаний). Типы: depends_on, used_by, extends, implements, contains, related_to, contradicts, solves, references, follows, precedes, causes, prevents и др.",
+              },
             },
             required: [
               "session_id",
@@ -99,18 +250,15 @@ export const GRANULATOR_JSON_SCHEMA = {
               "message_ids",
               "participants",
             ],
-            additionalProperties: false,
           },
         },
         required: ["content", "namespace", "importance", "metadata"],
-        additionalProperties: false,
       },
       minItems: 0,
       maxItems: 20,
     },
   },
   required: ["summary", "granules"],
-  additionalProperties: false,
 } as const;
 
 // ── Валидация ответа LLM ──
@@ -213,17 +361,115 @@ function validateGranule(
     );
   }
 
+  // Валидация entity_type — универсальный список
+  if (meta.entity_type !== undefined && meta.entity_type !== null) {
+    const et = String(meta.entity_type);
+    if (!(ALL_ENTITY_TYPES as readonly string[]).includes(et)) {
+      throw new Error(
+        `Гранула [${index}]: metadata.entity_type должен быть одним из: ${ALL_ENTITY_TYPES.join(", ")}`
+      );
+    }
+  }
+
+  // Валидация adr_status
+  if (meta.adr_status !== undefined && meta.adr_status !== null) {
+    const validStatuses = ["proposed", "accepted", "deprecated", "superseded"];
+    if (!validStatuses.includes(String(meta.adr_status))) {
+      throw new Error(
+        `Гранула [${index}]: metadata.adr_status должен быть одним из: ${validStatuses.join(", ")}`
+      );
+    }
+  }
+
+  // Валидация confidence
+  if (meta.confidence !== undefined && meta.confidence !== null) {
+    const c = Number(meta.confidence);
+    if (isNaN(c) || c < 0 || c > 1) {
+      throw new Error(
+        `Гранула [${index}]: metadata.confidence должен быть числом 0.0–1.0`
+      );
+    }
+  }
+
+  // Валидация links
+  if (meta.links !== undefined && meta.links !== null) {
+    if (!Array.isArray(meta.links)) {
+      throw new Error(`Гранула [${index}]: metadata.links должен быть массивом`);
+    }
+    for (let li = 0; li < meta.links.length; li++) {
+      const link = meta.links[li] as Record<string, unknown>;
+      if (!link || typeof link !== "object") {
+        throw new Error(`Гранула [${index}]: links[${li}] не является объектом`);
+      }
+      if (typeof link.type !== "string" || !(ALL_LINK_TYPES as readonly string[]).includes(link.type)) {
+        throw new Error(
+          `Гранула [${index}]: links[${li}].type должен быть одним из: ${ALL_LINK_TYPES.join(", ")}`
+        );
+      }
+      if (typeof link.target !== "string" || link.target.length === 0) {
+        throw new Error(`Гранула [${index}]: links[${li}].target обязателен`);
+      }
+    }
+  }
+
+  // Собираем metadata, включая опциональные поля
+  const metadata: GranuleMetadata = {
+    session_id: String(meta.session_id),
+    agent: String(meta.agent),
+    project_id: String(meta.project_id),
+    title: String(meta.title),
+    message_ids: (meta.message_ids as unknown[]).map(String),
+    participants: (meta.participants as unknown[]).map(String),
+  };
+
+  // Универсальные опциональные поля
+  if (meta.entity_type !== undefined && meta.entity_type !== null) {
+    metadata.entity_type = String(meta.entity_type) as EntityType;
+  }
+  if (meta.entity_name !== undefined && meta.entity_name !== null) {
+    metadata.entity_name = String(meta.entity_name);
+  }
+
+  // Поля code_knowledge
+  if (meta.module_path !== undefined && meta.module_path !== null) {
+    metadata.module_path = String(meta.module_path);
+  }
+  if (meta.signature !== undefined && meta.signature !== null) {
+    metadata.signature = String(meta.signature);
+  }
+  if (meta.is_deprecated !== undefined && meta.is_deprecated !== null) {
+    metadata.is_deprecated = Boolean(meta.is_deprecated);
+  }
+  if (meta.source_location !== undefined && meta.source_location !== null) {
+    metadata.source_location = String(meta.source_location);
+  }
+
+  // Поля project_meta
+  if (meta.adr_status !== undefined && meta.adr_status !== null) {
+    metadata.adr_status = String(meta.adr_status) as GranuleMetadata["adr_status"];
+  }
+
+  // Поля user_facts
+  if (meta.confidence !== undefined && meta.confidence !== null) {
+    metadata.confidence = Number(meta.confidence);
+  }
+
+  // Links
+  if (meta.links !== undefined && meta.links !== null && Array.isArray(meta.links)) {
+    metadata.links = (meta.links as unknown[]).map((l) => {
+      const link = l as Record<string, unknown>;
+      return {
+        type: String(link.type) as LinkType,
+        target: String(link.target),
+        description: link.description ? String(link.description) : undefined,
+      };
+    });
+  }
+
   return {
-    content: raw.content,
+    content: String(raw.content),
     namespace: raw.namespace as Namespace,
     importance: importance as 1 | 2 | 3 | 4 | 5,
-    metadata: {
-      session_id: String(meta.session_id),
-      agent: String(meta.agent),
-      project_id: String(meta.project_id),
-      title: String(meta.title),
-      message_ids: meta.message_ids.map(String),
-      participants: meta.participants.map(String),
-    },
+    metadata,
   };
 }

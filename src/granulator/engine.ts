@@ -72,10 +72,11 @@ export async function granulate(
       return;
     }
 
-    // Сохраняем данные сессии для тула granulate_output
+    // Сохраняем данные сессии для тула granulate_output (с projectId)
     storeSessionData(context.sessionId, {
       messages,
       participants: context.participants,
+      projectId: context.projectId,
     });
 
     const systemPrompt = getSystemPrompt();

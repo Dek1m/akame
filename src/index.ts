@@ -6,6 +6,7 @@ import { handleSessionIdle } from "./events/session-handler.js";
 import { handleFileEdited } from "./events/file-handler.js";
 import { handleToolExecuteAfter } from "./events/tool-handler.js";
 import { createGranulateTool } from "./granulator/granulate-tool.js";
+import { createCodeIndexTool } from "./tools/code-index-tool.js";
 
 const akamePlugin: Plugin = async (
   input: PluginInput,
@@ -16,8 +17,9 @@ const akamePlugin: Plugin = async (
 
   log.info(`akame загружен (userId: ${config.userId}, dir: ${input.directory})`);
 
-  // Создаём тул для грануляции (один раз, при загрузке плагина)
+  // Создаём тулы (один раз, при загрузке плагина)
   const granulateTool = createGranulateTool(config, log);
+  const codeIndexTool = createCodeIndexTool(config, log);
 
   return {
     dispose: async () => {
@@ -53,6 +55,7 @@ const akamePlugin: Plugin = async (
 
     tool: {
       granulate_output: granulateTool,
+      code_index: codeIndexTool,
     },
   };
 };

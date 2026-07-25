@@ -1,6 +1,6 @@
 // ── Кастомный тул для грануляции ──
-// LLM вызывает этот тул вместо генерации JSON в тексте
-// Тул валидирует данные и отправляет в athena-memory
+// ДОСТУПЕН ТОЛЬКО агенту memory-granulator (Тишь).
+// Любой другой агент получит ошибку.
 
 import { tool } from "@opencode-ai/plugin";
 import { MCPClient } from "../mcp/client.js";
@@ -14,6 +14,7 @@ import type { Logger } from "../logger.js";
 interface SessionData {
   messages: { id: string; role: string; content: string }[];
   participants: string[];
+  projectId: string;
 }
 
 const sessionStore = new Map<string, SessionData>();
@@ -24,7 +25,6 @@ export function storeSessionData(
   data: SessionData
 ): void {
   sessionStore.set(sessionId, data);
-  // Автоочистка
   setTimeout(() => sessionStore.delete(sessionId), STORE_TTL);
 }
 
@@ -36,8 +36,17 @@ export function createGranulateTool(
 
   return tool({
     description:
-      "Сохранить результаты анализа диалога в athena-memory. Вызови этот инструмент после анализа сообщений диалога. Передай summary (о чём диалог) и массив извлечённых гранул знаний.",
+      "[ТОЛЬКО ДЛЯ memory-granulator] Сохранить результаты анализа диалога в athena-memory. " +
+      "Вызов этого инструмента разрешён только агенту memory-granulator (Тишь). " +
+      "Передай summary (о чём диалог) и массив извлечённых гранул знаний. " +
+      "Для code_knowledge указывай entity_type, module_path, entity_name, signature. " +
+      "Для всех namespace можно указывать entity_type, entity_name, links (граф знаний). " +
+      "Опционально можно указать project_id — если не указан, определяется автоматически из сессии или конфига.",
     args: {
+      project_id: tool.schema
+        .string()
+        .optional()
+        .describe("ID проекта (akame/selti). Если не указан, используется из данных сессии или дефолтный из конфига."),
       summary: tool.schema
         .string()
         .describe("Краткое описание диалога одной строкой (до 200 символов)"),
@@ -68,6 +77,66 @@ export function createGranulateTool(
             participants: tool.schema
               .array(tool.schema.string())
               .describe("Участники диалога, имеющие отношение к этой грануле"),
+            // Универсальные поля для любого namespace
+            entity_type: tool.schema
+              .string()
+              .optional()
+              .describe("Тип сущности. Для code_knowledge: module/class/interface/function/sql_query/table/architecture/change. Для project_meta: adr/decision/architecture/risk. Для user_facts: person/preference/habit/skill. Для dialogue_insights: insight/agreement/conclusion/pattern."),
+            entity_name: tool.schema
+              .string()
+              .optional()
+              .describe("Имя сущности (класса, ADR, человека, паттерна)"),
+            // Поля для code_knowledge
+            module_path: tool.schema
+              .string()
+              .optional()
+              .describe("Путь к файлу от корня проекта (для code_knowledge)"),
+            signature: tool.schema
+              .string()
+              .optional()
+              .describe("Сигнатура функции/класса (для code_knowledge)"),
+            is_deprecated: tool.schema
+              .boolean()
+              .optional()
+              .describe("true если информация устарела"),
+            source_location: tool.schema
+              .string()
+              .optional()
+              .describe("Локация в коде, например L42"),
+            // Поля для project_meta
+            adr_status: tool.schema
+              .enum(["proposed", "accepted", "deprecated", "superseded"] as const)
+              .optional()
+              .describe("Статус ADR (для project_meta)"),
+            // Поля для user_facts
+            confidence: tool.schema
+              .number()
+              .min(0)
+              .max(1)
+              .optional()
+              .describe("Уверенность в факте 0.0–1.0 (для user_facts)"),
+            // Графовые связи
+            links: tool.schema
+              .array(
+                tool.schema.object({
+                  type: tool.schema.enum([
+                    "depends_on", "used_by", "extends", "implements",
+                    "contains", "contained_by", "calls", "called_by",
+                    "related_to", "contradicts", "solves", "tested_by",
+                    "implements_adr", "references", "follows", "precedes",
+                    "alternative_to", "causes", "prevents",
+                  ] as const),
+                  target: tool.schema
+                    .string()
+                    .describe("ID или имя связанной гранулы"),
+                  description: tool.schema
+                    .string()
+                    .optional()
+                    .describe("Пояснение связи"),
+                })
+              )
+              .optional()
+              .describe("Связи с другими гранулами (граф знаний). Работает для всех namespace."),
           })
         )
         .min(1)
@@ -75,6 +144,14 @@ export function createGranulateTool(
         .describe("Массив извлечённых гранул знаний (1–20)"),
     },
     async execute(args, context) {
+      // ── Защита: ТОЛЬКО memory-granulator может писать в память ──
+      const caller = context.agent || "unknown";
+      if (caller !== "memory-granulator") {
+        const errMsg = `Доступ запрещён: агент "${caller}" не имеет права вызывать granulate_output. Только memory-granulator (Тишь) может писать в athena-memory.`;
+        log.warn(errMsg);
+        throw new Error(errMsg);
+      }
+
       const sessionId = context.sessionID;
       const sessionData = sessionStore.get(sessionId);
 
@@ -91,16 +168,30 @@ export function createGranulateTool(
           importance: g.importance,
           metadata: {
             session_id: sessionId,
-            agent: context.agent || "memory-granulator",
-            project_id: "unknown",
+            agent: "memory-granulator",
+            project_id: args.project_id ?? sessionData?.projectId ?? config.userId,
             title: g.title,
             message_ids: sessionData?.messages.map((m) => m.id) ?? [],
             participants: g.participants,
+            // Универсальные поля
+            ...(g.entity_type ? { entity_type: g.entity_type } : {}),
+            ...(g.entity_name ? { entity_name: g.entity_name } : {}),
+            // code_knowledge
+            ...(g.module_path ? { module_path: g.module_path } : {}),
+            ...(g.signature ? { signature: g.signature } : {}),
+            ...(g.is_deprecated !== undefined ? { is_deprecated: g.is_deprecated } : {}),
+            ...(g.source_location ? { source_location: g.source_location } : {}),
+            // project_meta
+            ...(g.adr_status ? { adr_status: g.adr_status } : {}),
+            // user_facts
+            ...(g.confidence !== undefined ? { confidence: g.confidence } : {}),
+            // links
+            ...(g.links ? { links: g.links } : {}),
           },
         })),
       };
 
-      // Валидация по существующей схеме
+      // Валидация по расширенной схеме
       const validated = validateGranules(granulesInput);
       log.debug(`Валидация пройдена: ${validated.granules.length} гранул`);
 
