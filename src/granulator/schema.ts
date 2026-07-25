@@ -15,6 +15,8 @@ export type EntityType =
   | "person" | "preference" | "habit" | "skill" | "pain_point" | "contact"
   // Для dialogue_insights
   | "insight" | "agreement" | "conclusion" | "context" | "pattern" | "question"
+  // Для infrastructure
+  | "server" | "container" | "service" | "api" | "network" | "volume" | "os"
   // Общее
   | "unknown";
 
@@ -29,7 +31,9 @@ export type LinkType =
   // Семантические
   | "solves" | "tested_by" | "implements_adr"
   | "references" | "follows" | "precedes" | "alternative_to"
-  | "causes" | "prevents";
+  | "causes" | "prevents"
+  // Инфраструктурные
+  | "runs_on" | "exposes" | "mounts";
 
 export interface CodeLink {
   type: LinkType;
@@ -92,6 +96,8 @@ export const ALL_ENTITY_TYPES = [
   "person", "preference", "habit", "skill", "pain_point", "contact",
   // dialogue_insights
   "insight", "agreement", "conclusion", "context", "pattern", "question",
+  // infrastructure
+  "server", "container", "service", "api", "network", "volume", "os",
   // общее
   "unknown",
 ] as const;
@@ -103,6 +109,7 @@ export const ALL_LINK_TYPES = [
   "solves", "tested_by", "implements_adr",
   "references", "follows", "precedes", "alternative_to",
   "causes", "prevents",
+  "runs_on", "exposes", "mounts",
 ] as const;
 
 // Рекомендации по entity_type для каждого namespace
@@ -111,6 +118,7 @@ export const ENTITY_TYPE_BY_NAMESPACE: Record<string, string[]> = {
   project_meta: ["adr", "decision", "architecture", "risk", "requirement", "status", "config"],
   user_facts: ["person", "preference", "habit", "skill", "pain_point", "contact"],
   dialogue_insights: ["insight", "agreement", "conclusion", "context", "pattern", "question"],
+  infrastructure: ["server", "container", "service", "api", "network", "volume", "os"],
 };
 
 // ── JSON Schema для LLM structured output ──
@@ -139,6 +147,7 @@ export const GRANULATOR_JSON_SCHEMA = {
               "project_meta",
               "dialogue_insights",
               "code_knowledge",
+              "infrastructure",
             ],
             description: "Категория гранулы",
           },
@@ -309,6 +318,7 @@ function validateGranule(
     "project_meta",
     "dialogue_insights",
     "code_knowledge",
+    "infrastructure",
   ];
   if (!validNamespaces.includes(raw.namespace as string)) {
     throw new Error(

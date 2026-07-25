@@ -3,12 +3,14 @@ export const NAMESPACE_USER_FACTS = "user_facts" as const;
 export const NAMESPACE_PROJECT_META = "project_meta" as const;
 export const NAMESPACE_DIALOGUE_INSIGHTS = "dialogue_insights" as const;
 export const NAMESPACE_CODE_KNOWLEDGE = "code_knowledge" as const;
+export const NAMESPACE_INFRASTRUCTURE = "infrastructure" as const;
 
 export const NAMESPACES = [
   NAMESPACE_USER_FACTS,
   NAMESPACE_PROJECT_META,
   NAMESPACE_DIALOGUE_INSIGHTS,
   NAMESPACE_CODE_KNOWLEDGE,
+  NAMESPACE_INFRASTRUCTURE,
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];
@@ -29,7 +31,7 @@ export const DEFAULTS = {
   DEBOUNCE_MS: 2000,
   MAX_BATCH: 20,
   MAX_MESSAGES: 50,
-  ENRICH_LINKS: false,
+  ENRICH_LINKS: true,
 } as const;
 
 // ── Типы конфигурации плагина ──
