@@ -17,24 +17,38 @@
 |  +--------------------------------------------------------------+ |
 |  |  akame plugin (.opencode/plugins/akame/)                      | |
 |  |                                                               | |
-|  |  События:                  Обработчики:                       | |
-|  |  session.idle -----------> session-handler.ts (cooldown 30s)  | |
-|  |  file.edited ------------> file-handler.ts    (debounce 2s)   | |
-|  |  tool.execute.after -----> tool-handler.ts    (git filter)    | |
+|  |  События:                    Обработчики:                     | |
+|  |  session.idle ------------> session-handler.ts (cooldown 30s) | |
+|  |  session.compacted -------> session-handler.ts                | |
+|  |  session.diff ------------> session-handler.ts                | |
+|  |  file.edited -------------> file-handler.ts    (debounce 2s)  | |
+|  |  file.watcher.updated ----> file-handler.ts    (debounce 2s)  | |
+|  |  tool.execute.after ------> tool-handler.ts    (git filter)   | |
+|  |  tool.execute.before -----> tool-handler.ts    (pre-process)  | |
+|  |  command.executed --------> tool-handler.ts    (git filter)   | |
+|  |                                                               | |
+|  |  Tools (зарегистрированы в hooks.tool):                       | |
+|  |  granulate_output  code_index  code_diff  code_graph          | |
+|  |  dependency_analyzer  migrate_legacy_granules  graph_health   | |
 |  |                                                               | |
 |  |  +-----------+   +---------------+   +--------------------+   | |
 |  |  | collector |-->|  granulator   |-->|  LLM (agent:      |   | |
 |  |  | (данные)  |   |  engine.ts    |   |  memory-granulator)|  | |
 |  |  +-----------+   +---------------+   +---------+----------+   | |
-|  |                                         tool   |              | |
-|  |                                   granulate_output             | |
+|  |                                     tool вызовы|              | |
+|  |                              granulate_output   |              | |
+|  |                              code_index и др.   |              | |
 |  |                                         |                      | |
 |  |                                   +-----v----------+          | |
 |  |                                   | granulate-tool  |          | |
 |  |                                   | -> валидация    |          | |
 |  |                                   | -> MCP client   |          | |
 |  |                                   +--------+--------+          | |
-|  +--------------------------------------------+-------------------+ |
+|  |  +----------------------------------------------+             | |
+|  |  | link-enricher (пост-обработка)               |             | |
+|  |  | -> автосвязи между гранулами                 |             | |
+|  |  +----------------------------------------------+             | |
+|  +--------------------------------------------------------------+ |
 +-------------------------------------------------------------------+
                                                  |
                                       JSON-RPC over HTTP POST
@@ -107,29 +121,54 @@ akame загружен (userId: akame)
 | `AKAME_USER_ID` | `akame` | Владелец записей в памяти |
 | `AKAME_GRANULATE_IDLE` | `true` | Гранулировать при `session.idle` |
 | `AKAME_GRANULATE_FILE` | `false` | Гранулировать при `file.edited` |
-| `AKAME_GRANULATE_TOOL` | `true` | Гранулировать после git-команд (`tool.execute.after`) |
-| `AKAME_COOLDOWN_MS` | `30000` | Cooldown между грануляциями одной сессии (мс) |
+| `AKAME_GRANULATE_TOOL` | `true` | Гранулировать после git-команд |
+| `AKAME_COOLDOWN_MS` | `30000` | Cooldown между грануляциями (мс) |
 | `AKAME_DEBOUNCE_MS` | `2000` | Debounce для `file.edited` (мс) |
-| `AKAME_MAX_BATCH` | `20` | Максимальное количество гранул в одном batch |
-| `AKAME_MAX_MESSAGES` | `50` | Максимальное количество сообщений для анализа |
+| `AKAME_MAX_BATCH` | `20` | Макс. гранул в одном `ingest_batch` |
+| `AKAME_MAX_MESSAGES` | `50` | Макс. сообщений для анализа |
 
-Полное описание см. в [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+Полный список (17 переменных, включая `AKAME_GRANULATE_COMPACTED`, `AKAME_ENRICH_LINKS` и др.) — в [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ---
 
 ## Как работает грануляция
 
-akame реагирует на три типа событий opencode:
+akame реагирует на восемь типов событий opencode:
 
 | Событие | Что происходит | Защита |
 |---|---|---|
-| `session.idle` | Собирает сообщения (включая дочерние сессии), сохраняет данные в session-store, отправляет промпт LLM с агентом `memory-granulator`. LLM вызывает кастомный tool `granulate_output`, который валидирует гранулы и отправляет в athena-memory | Cooldown 30 сек |
+| `session.idle` | Собирает сообщения (включая дочерние сессии), отправляет промпт LLM с агентом `memory-granulator` | Cooldown 30 сек |
+| `session.compacted` | Гранулирует компактированную сессию (сжатую историю диалога) | Cooldown |
+| `session.diff` | Гранулирует изменения в рамках сессии (авто-коммиты) | Cooldown |
 | `file.edited` | Фильтрует код/конфиги, debounce перед грануляцией | Debounce 2 сек |
+| `file.watcher.updated` | Реагирует на изменения файлов через file watcher | Debounce 2 сек |
 | `tool.execute.after` | Ловит git-команды (commit, push, merge, PR) | Фильтр только git |
+| `tool.execute.before` | Pre-processing — перехват до выполнения инструмента | Фильтр |
+| `command.executed` | Реагирует на выполненные команды в opencode | Фильтр только git |
 
 **Ключевое отличие от предыдущей версии:** akame больше не парсит JSON из текстового ответа LLM. Вместо этого LLM (агент memory-granulator) вызывает кастомный tool `granulate_output` с типизированными аргументами. Валидация (`validateGranules`) происходит внутри tool, а не в engine.
 
 Подробнее — в [docs/GRANULATION.md](docs/GRANULATION.md).
+
+---
+
+## Инструменты (Tools)
+
+akame регистрирует 7 кастомных инструментов для LLM-агента `memory-granulator` (Тишь). Все тулы защищены — вызывать их может только Тишь (или пользователь для `migrate_legacy_granules`).
+
+| Tool | Файл | Назначение |
+|---|---|---|
+| `granulate_output` | `src/granulator/granulate-tool.ts` | Сохранение гранул в athena-memory: валидация → батчинг → MCP |
+| `code_index` | `src/tools/code-index-tool.ts` | Сканирование `.ts`/`.py` файлов и создание `code_knowledge` гранул |
+| `code_diff` | `src/tools/code-diff-tool.ts` | Анализ unified diff → гранулы code_knowledge (added/modified/removed) |
+| `code_graph` | `src/tools/code-graph-tool.ts` | Построение графа зависимостей, поиск сирот, циклов, обратных связей |
+| `dependency_analyzer` | `src/tools/dependency-analyzer-tool.ts` | Анализ импортов → создание `depends_on`/`used_by` связей |
+| `migrate_legacy_granules` | `src/tools/migrate-legacy-granules-tool.ts` | Миграция старых гранул в новый формат (извлечение entity_type/name) |
+| `graph_health` | `src/tools/graph-health-tool.ts` | Проверка здоровья графа: связность, дубликаты, cross-ns связи |
+
+Все тулы (кроме `granulate_output`) работают через `MCPClient`: поиск существующих гранул → дедупликация → создание/обновление записей в athena-memory.
+
+Подробнее о каждом инструменте — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -140,7 +179,8 @@ akame реагирует на три типа событий opencode:
 | `user_facts` | Факты о пользователе | «Серёжа предпочитает короткие access token» |
 | `project_meta` | Архитектурные решения, ADR | «Принято решение использовать JWT вместо cookie-сессий» |
 | `dialogue_insights` | Инсайты из диалогов | «Выяснено: проект требует горизонтального масштабирования» |
-| `code_knowledge` | Знания из кода | «В auth.middleware.ts реализована проверка JWT» |
+| `code_knowledge` | Знания из кода | «В `auth.middleware.ts` реализована проверка JWT» |
+| `infrastructure` | Инфраструктурные факты | «athena-memory работает на порту 8000 в Docker» |
 
 ---
 
@@ -163,36 +203,63 @@ akame реагирует на три типа событий opencode:
 ```
 akame/
 ├── src/
-│   ├── index.ts                 # Точка входа — PluginModule + v1 Hooks + регистрация tool
-│   ├── config.ts                # Чтение переменных окружения AKAME_*
-│   ├── constants.ts             # Namespace-ы, дефолты, типы конфигурации
-│   ├── logger.ts                # Асинхронный логгер через client.app.log
+│   ├── index.ts                        # PluginModule + v1 Hooks + регистрация 7 tools
+│   ├── config.ts                       # Чтение AKAME_* переменных окружения
+│   ├── constants.ts                    # Namespace-ы, дефолты, типы конфигурации
+│   ├── logger.ts                       # Асинхронный логгер через client.app.log
 │   ├── mcp/
-│   │   └── client.ts            # HTTP-клиент athena-memory (JSON-RPC 2.0)
+│   │   └── client.ts                   # HTTP-клиент athena-memory (JSON-RPC 2.0)
+│   ├── scanner/
+│   │   └── code-index.ts               # Regex-парсеры .ts/.py → классы, функции, типы
 │   ├── granulator/
-│   │   ├── schema.ts            # JSON Schema + типы + валидация гранул
-│   │   ├── engine.ts            # Ядро: сбор контекста -> LLM (memory-granulator)
-│   │   └── granulate-tool.ts    # Кастомный tool: валидация -> MCP -> athena-memory
-│   └── events/
-│       ├── session-handler.ts   # session.idle + cooldown
-│       ├── file-handler.ts      # file.edited + debounce
-│       └── tool-handler.ts      # tool.execute.after (git-only)
+│   │   ├── schema.ts                   # JSON Schema + типы + валидация гранул
+│   │   ├── engine.ts                   # Ядро: сбор контекста → LLM (memory-granulator)
+│   │   ├── granulate-tool.ts           # Tool: валидация → MCP → athena-memory
+│   │   └── link-enricher.ts            # Пост-обработка: автосвязи между гранулами
+│   ├── tools/
+│   │   ├── code-index-tool.ts          # Tool: code_index
+│   │   ├── code-diff-tool.ts           # Tool: code_diff
+│   │   ├── code-graph-tool.ts          # Tool: code_graph
+│   │   ├── dependency-analyzer-tool.ts # Tool: dependency_analyzer
+│   │   ├── migrate-legacy-granules-tool.ts  # Tool: migrate_legacy_granules
+│   │   └── graph-health-tool.ts        # Tool: graph_health
+│   ├── events/
+│   │   ├── session-handler.ts          # session.idle / compacted / diff
+│   │   ├── file-handler.ts             # file.edited / file.watcher.updated
+│   │   ├── tool-handler.ts             # tool.execute.after / before, command.executed
+│   │   └── git-diff.ts                 # Git diff утилита (получение unified diff)
+│   └── security/
+│       └── validate.ts                 # Защита от path traversal (resolveSafePath)
 ├── tests/
+│   ├── config.test.ts
 │   ├── mcp/
 │   │   └── client.test.ts
+│   ├── scanner/
+│   │   └── code-index.test.ts
 │   ├── granulator/
 │   │   ├── engine.test.ts
 │   │   └── schema.test.ts
+│   ├── tools/
+│   │   ├── code-index-tool.test.ts
+│   │   ├── code-diff-tool.test.ts
+│   │   ├── code-graph-tool.test.ts
+│   │   ├── dependency-analyzer-tool.test.ts
+│   │   ├── migrate-legacy-granules-tool.test.ts
+│   │   └── graph-health-tool.test.ts
 │   └── events/
 │       ├── session-handler.test.ts
 │       ├── file-handler.test.ts
 │       └── tool-handler.test.ts
 ├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── CONFIGURATION.md
-│   └── GRANULATION.md
+│   ├── ARCHITECTURE.md                 # Детальная архитектура
+│   ├── CONFIGURATION.md                # Полное руководство по конфигурации
+│   ├── GRANULATION.md                  # Процесс грануляции
+│   ├── GRANULATION_STANDARD.md         # Стандарт грануляции знаний
+│   └── PLAN_CODE_INDEX.md              # План разработки code_index
 ├── .env.example
+├── opencode.json.example
 ├── package.json
+├── tsconfig.json
 └── README.md
 ```
 

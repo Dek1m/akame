@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockList = vi.fn();
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    list: mockList,
-  })),
-}));
+const mockMcp = {
+  search: vi.fn(),
+  ingestBatch: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
 import { createGraphHealthTool } from "../../src/tools/graph-health-tool.js";
 
@@ -75,43 +78,43 @@ const ALL_NS = [
 
 describe("graph-health-tool", () => {
   beforeEach(() => {
-    mockList.mockReset();
+    mockMcp.list.mockReset();
     // По умолчанию — все namespace пустые
-    mockList.mockImplementation((_userId, ns: string) => {
+    mockMcp.list.mockImplementation((_userId, ns: string) => {
       return { items: [], total: 0 };
     });
   });
 
   describe("createGraphHealthTool", () => {
     it("бросает ошибку если агент не memory-granulator", async () => {
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       await expect(
         t.execute({ project: "akame" }, makeContext("tester"))
       ).rejects.toThrow("Доступ запрещён");
     });
 
     it("сообщает если граф пуст", async () => {
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("граф пуст");
     });
 
     it("собирает гранулы из всех namespace", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return { items: [makeGranule("mod-1", "code_knowledge")], total: 1 };
         }
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("Всего гранул: 1");
       expect(result).toContain("code_knowledge");
     });
 
     it("показывает статистику связанности", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -126,14 +129,14 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       // mod-a имеет исходящие, mod-b имеет входящие → оба связаны
       expect(result).toContain("100% связаны");
     });
 
     it("находит сирот", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -145,13 +148,13 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("сирот");
     });
 
     it("показывает verbose список сирот", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -164,7 +167,7 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", verbose: true },
         makeContext()
@@ -174,7 +177,7 @@ describe("graph-health-tool", () => {
     });
 
     it("находит cross-namespace связи", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -196,14 +199,14 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       // Должен показать cross-namespace связь
       expect(result).toContain("code_knowledge → project_meta");
     });
 
     it("находит критичных сирот (importance ≥ 3)", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -216,7 +219,7 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("critical");
       // minor (importance=1) не должен быть в критичных сиротах
@@ -224,7 +227,7 @@ describe("graph-health-tool", () => {
     });
 
     it("находит дубликаты entity_name", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -237,13 +240,13 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("Дубликатов entity_name: 1");
     });
 
     it("показывает среднее связей на гранулу", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [
@@ -262,13 +265,13 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("Среднее связей на гранулу:");
     });
 
     it("корректно обрабатывает несколько namespace с разным количеством", async () => {
-      mockList.mockImplementation((_userId, ns: string) => {
+      mockMcp.list.mockImplementation((_userId, ns: string) => {
         if (ns === "code_knowledge") {
           return {
             items: [makeGranule("c1", "code_knowledge")],
@@ -284,7 +287,7 @@ describe("graph-health-tool", () => {
         return { items: [], total: 0 };
       });
 
-      const t = createGraphHealthTool(defaultConfig, mockLog);
+      const t = createGraphHealthTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute({ project: "akame" }, makeContext());
       expect(result).toContain("user_facts: 1");
       expect(result).toContain("code_knowledge: 1");

@@ -571,6 +571,362 @@ const GIT_TOOLS = new Set(["git", "bash", "gh"]);
 
 ---
 
+### 12. scanner/code-index.ts — Сканер кода
+
+**Файл:** `src/scanner/code-index.ts`
+
+Regex-based парсеры для `.ts`/`.tsx` и `.py` файлов. Извлекает классы, интерфейсы, функции, типы и enum-ы.
+
+**Основные функции:**
+
+```typescript
+parseTSFile(content: string, relativePath: string): ScannedFile
+parsePythonFile(content: string, relativePath: string): ScannedFile
+scanDirectory(rootDir: string): ScannedFile[]
+scanProject(project: string, directory: string): ScanResult
+```
+
+**Типы сущностей:**
+
+```typescript
+type ScannedEntityType = "class" | "interface" | "function" | "type" | "enum";
+
+interface ScannedEntity {
+  type: ScannedEntityType;
+  name: string;
+  signature: string;
+  source_location: string;  // "L42"
+  extends?: string;
+  implements?: string[];
+  methods?: string[];
+}
+
+interface ScannedFile {
+  path: string;
+  module: string;
+  exports: ScannedEntity[];
+  imports: string[];
+}
+
+interface ScanResult {
+  project: string;
+  files: ScannedFile[];
+  timestamp: string;
+}
+```
+
+**TS-парсер:** отслеживает состояние тела класса (глубина фигурных скобок), извлекает методы, свойства-стрелки, наследование (`extends`/`implements`). Определяет: `export class`, `export interface`, `export function`, `export const ... = (...) =>`, `export type`, `export enum`.
+
+**Python-парсер:** indent-основанный. Отслеживает классы и методы (`def` внутри класса), пропускает docstring-и. Определяет: `class`, `def`, `from ... import`, `import`.
+
+**Исключаемые директории:** `node_modules`, `.venv`, `dist`, `build`, `__pycache__`, `.git`, `.next`, `coverage`.
+
+---
+
+### 13. tools/code-index-tool.ts — Tool code_index
+
+**Файл:** `src/tools/code-index-tool.ts`
+
+Сканирует проект и создаёт code_knowledge гранулы в athena-memory. Извлекает классы, интерфейсы, функции, типы и enum-ы из TypeScript и Python файлов. Создаёт модульные и сущностные гранулы со связями.
+
+**Аргументы:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `project` | `string` | Название проекта (например, `"akame"`) |
+| `directory` | `string` | Абсолютный путь к директории проекта |
+
+**Доступ:** только `memory-granulator` (Тишь). Другие агенты получат ошибку «Доступ запрещён».
+
+**Защита:** аргумент `directory` проверяется через `resolveSafePath()` — предотвращает path traversal за пределы рабочей директории.
+
+**Поток выполнения:**
+
+1. **Сканирование** — вызов `scanProject()` → `ScannedFile[]`
+2. **Дедупликация** — поиск существующих гранул через `mcp.search()` (threshold 0.2 для массового поиска), сбор ключей `entity_name:project_id`
+3. **Построение гранул:**
+   - **Модульные** — одна гранула на модуль (`entity_type: "module"`)
+   - **Сущностные** — по одной на каждый `ScannedEntity` (`entity_type: class/function/interface/type/enum`)
+4. **Связи:**
+   - `contained_by` — сущность → модуль
+   - `depends_on` — по импортам (если имя импорта совпадает с известной сущностью)
+   - `extends` / `implements` — наследование
+5. **Сохранение** — батчами через `MCPClient.ingestBatch()` по `config.maxBatch` штук
+
+**Результат:** отчёт с количеством просканированных файлов, созданных гранул (модули + сущности), пропущенных (уже в памяти), и статистикой сохранения.
+
+---
+
+### 14. tools/code-diff-tool.ts — Tool code_diff
+
+**Файл:** `src/tools/code-diff-tool.ts`
+
+Анализирует unified diff и создаёт code_knowledge гранулы. Парсит `git diff`, извлекает добавленные/удалённые/изменённые сущности (классы, функции, интерфейсы, типы, enum-ы).
+
+**Аргументы:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `project` | `string` | Название проекта |
+| `diff` | `string` | Unified diff для анализа |
+| `commitHash` | `string?` | Хеш коммита для контекста (опционально) |
+
+**Доступ:** только `memory-granulator` (Тишь).
+
+**Поток выполнения:**
+
+1. **Парсинг diff** — `parseDiff()` разбирает unified diff на `DiffFile[]` (файлы, ханки, строки)
+2. **Извлечение изменений** — `extractChanges()` находит:
+   - **Добавленные** (`action: "added"`): `export class`, `export function`, `export const ... =`, `export interface`, `export type`, `export enum`
+   - **Удалённые** (`action: "removed"`): те же паттерны в удалённых строках
+3. **Дедупликация** — поиск существующих гранул по `entity_name:project_id`
+4. **Построение гранул:**
+   - **Сводка** — одна гранула типа `change` на весь diff (файлы, строки, статистика)
+   - **Сущностные** — по одной на каждое изменение с типом `entity_type` = тип сущности
+5. **Связи:** `contained_by` → модуль файла
+6. **Удалённые сущности** — помечаются `is_deprecated: true`
+7. **Сохранение** — батчами через `MCPClient.ingestBatch()`
+
+**Результат:** отчёт с количеством файлов, добавленных/изменённых/удалённых сущностей, созданных гранул.
+
+---
+
+### 15. tools/code-graph-tool.ts — Tool code_graph
+
+**Файл:** `src/tools/code-graph-tool.ts`
+
+Строит граф зависимостей из code_knowledge гранул. Находит отсутствующие обратные связи, циклические зависимости и сирот.
+
+**Аргументы:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `project` | `string` | Название проекта |
+| `fixMissingLinks` | `boolean?` | Если `true` — автоматически создаёт отсутствующие обратные связи |
+
+**Доступ:** только `memory-granulator` (Тишь).
+
+**Анализ:**
+
+- **Отсутствующие обратные связи** — например, у A есть `depends_on` B, но у B нет `used_by` A. Матрица обратных связей: `depends_on` ↔ `used_by`, `contains` ↔ `contained_by`, `calls` ↔ `called_by`, `follows` ↔ `precedes`
+- **Циклические зависимости** — поиск через DFS с раскраской (WHITE/GRAY/BLACK)
+- **Сироты** — гранулы без входящих и исходящих связей
+
+**Режим `fixMissingLinks=true`:** для каждой отсутствующей обратной связи создаёт `CodeLink` и обновляет гранулу через `mcp.update()`. Группирует обновления по target-сущности.
+
+**Результат:** отчёт с количеством сущностей, рёбер, списком отсутствующих обратных связей, циклов, сирот. При `fixMissingLinks` — также количество исправленных связей.
+
+---
+
+### 16. tools/dependency-analyzer-tool.ts — Tool dependency_analyzer
+
+**Файл:** `src/tools/dependency-analyzer-tool.ts`
+
+Анализирует импорты в `.ts`/`.js`/`.py` файлах и создаёт/обновляет `depends_on` и `used_by` связи в code_knowledge гранулах.
+
+**Аргументы:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `project` | `string` | Название проекта |
+| `directory` | `string` | Абсолютный путь к директории проекта |
+
+**Доступ:** только `memory-granulator` (Тишь).
+
+**Защита:** `resolveSafePath()` — проверка на path traversal.
+
+**Поток выполнения:**
+
+1. **Сбор файлов** — рекурсивный обход, фильтр по расширениям (`.ts`, `.tsx`, `.js`, `.jsx`, `.py`)
+2. **Извлечение импортов** — `import ... from '...'`, `require()`, `await import()`, Python `import X` / `from X import Y`
+3. **Классификация:**
+   - **Внешние** (npm) — одиночный сегмент пути или scoped-пакет (`@scope/name`)
+   - **Внутренние** — относительные (`./utils`) или внутренние модульные (`src/...`)
+4. **Сопоставление с гранулами** — поиск существующих code_knowledge гранул через `mcp.search()`
+5. **Создание связей:**
+   - `depends_on` — от модуля к target-сущности (если импорт совпадает с известной гранулой)
+   - `used_by` — обратная связь к target-сущности
+6. **Обновление** — батчами через `mcp.update()`, без дублирования существующих связей
+
+**Результат:** отчёт с количеством файлов, модулей, внутренних/внешних зависимостей, созданных связей, обновлённых гранул.
+
+---
+
+### 17. tools/migrate-legacy-granules-tool.ts — Tool migrate_legacy_granules
+
+**Файл:** `src/tools/migrate-legacy-granules-tool.ts`
+
+Мигрирует старые гранулы code_knowledge в новый формат. Находит записи без полей `entity_name` и/или `entity_type`, извлекает их из контента и обновляет метаданные.
+
+**Аргументы:**
+
+| Поле | Тип | Дефолт | Описание |
+|---|---|---|---|
+| `namespace` | `string?` | `"code_knowledge"` | Namespace для миграции |
+| `dryRun` | `boolean?` | `false` | Только показать, что будет изменено |
+| `maxRecords` | `string?` | `"0"` | Максимум записей (0 = без лимита) |
+
+**Доступ:** `memory-granulator` (Тишь) и `user`.
+
+**Извлечение entity_type и entity_name:**
+
+- **Английские паттерны:** `class Foo`, `function foo`, `interface Foo`, `type Foo`, `enum Foo` — из начала контента
+- **Русские паттерны:** `класс Foo`, `функция foo`, `модуль foo`, `интерфейс Foo`, `тип Foo`
+- **По ключевым словам:** `architecture` (архитектурный паттерн), `config` (конфигурация), `change` (изменение), `test` (тест), `sql_query` (SQL-запрос), `table` (таблица)
+- **Fallback:** извлечение имени из `title` — первые 2-3 слова заголовка
+
+**Связи:** строит до 5 `related_to` связей по упоминаниям сущностей с большой буквы в контенте (исключая стоп-слова вроде `The`, `This`, `For`, `HTTP`, `JSON`).
+
+**Поток:**
+
+1. Пагинированный сбор всех записей из namespace через `mcp.list()`
+2. Фильтрация legacy (записи без `entity_name` или `entity_type`)
+3. Миграция батчами по 10 записей с паузой 100ms
+4. Обновление через `mcp.update()`
+
+**Результат:** количество просканированных, найденных legacy, мигрированных записей и ошибок.
+
+---
+
+### 18. tools/graph-health-tool.ts — Tool graph_health
+
+**Файл:** `src/tools/graph-health-tool.ts`
+
+Проверяет здоровье графа знаний. Анализирует связность, сирот, дубликаты и cross-namespace связи.
+
+**Аргументы:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `project` | `string` | Название проекта |
+| `verbose` | `boolean?` | Если `true` — показывает первые 20 сирот каждого namespace |
+
+**Доступ:** только `memory-granulator` (Тишь).
+
+**Метрики:**
+
+- **По namespace** — total / linked / orphan / % связанности. Гранула считается связанной, если у неё есть исходящие ссылки (`links`) или на неё кто-то ссылается (входящие)
+- **Cross-namespace матрица** — связи между разными namespace (например, `dialogue_insights → code_knowledge: 42`)
+- **Критичные сироты** — топ-10 гранул с `importance ≥ 3` без единой связи
+- **Дубликаты** — одинаковый `entity_name` в одном namespace
+- **Среднее число связей** на гранулу
+
+**Поток:**
+
+1. Сбор всех гранул из всех namespace пагинацией (по 50 записей)
+2. Построение lookup-таблиц: `idToGranule`, `nameToNs`
+3. Подсчёт входящих связей и cross-namespace переходов
+4. Анализ дубликатов
+5. Формирование отчёта
+
+**Результат:** многострочный отчёт со статистикой, top-10 критичных сирот, списком дубликатов (до 15).
+
+---
+
+### 19. granulator/link-enricher.ts — Пост-обработка связей
+
+**Файл:** `src/granulator/link-enricher.ts`
+
+Пост-обработка гранул после успешной грануляции. Автоматически создаёт cross-namespace связи между новыми и существующими гранулами.
+
+**Активация:** фича-флаг `config.enrichLinks` (по умолчанию `true`).
+
+**CNLM-матрица (Cross-Namespace Link Matrix):** определяет, между какими namespace искать связи:
+
+| Source NS | Target NS для поиска |
+|---|---|
+| `user_facts` | `dialogue_insights`, `project_meta` |
+| `dialogue_insights` | `code_knowledge`, `project_meta` |
+| `project_meta` | `code_knowledge`, `user_facts` |
+| `code_knowledge` | `project_meta` |
+
+**Типы автосвязей при высокой похожести (≥ 0.85):**
+
+| Source → Target | Тип связи |
+|---|---|
+| `dialogue_insights` → `code_knowledge` | `solves` |
+| `code_knowledge` → `project_meta` | `implements_adr` |
+| `user_facts` → `dialogue_insights` | `causes` |
+| Остальные комбинации | `references` |
+
+**Ограничения:**
+- Максимум 5 связей на гранулу
+- Порог похожести: `0.75` (для `memory_find_similar`)
+- Гранулы с `importance = 1` не обогащаются
+- Не связывает гранулу саму с собой
+
+**Поток:**
+
+1. Получение последних 200 гранул через `mcp.recent()`
+2. Фильтрация по `session_id` текущей сессии
+3. Для каждой новой гранулы: поиск кандидатов в target-namespace через `mcp.findSimilar()`
+4. Определение типа связи (CNLM-матрица + порог)
+5. Обновление гранулы через `mcp.update()` с объединённым списком связей
+
+**Вызов:** из `engine.ts` после успешного сохранения гранул (fire-and-forget, ошибки логируются).
+
+---
+
+### 20. events/git-diff.ts — Git diff утилита
+
+**Файл:** `src/events/git-diff.ts`
+
+Утилита для получения unified diff через git. Используется обработчиками событий при грануляции изменений кода.
+
+**Типы:**
+
+```typescript
+interface DiffResult {
+  diff: string;
+  filePath: string;
+  type: "modified" | "created" | "deleted";
+  content?: string;
+}
+```
+
+**Функции:**
+
+```typescript
+getGitDiff(filePath: string, log?: Logger): DiffResult
+truncateDiff(diff: string, maxLines?: number): string
+```
+
+**Логика `getGitDiff()`:**
+
+1. Если файл не существует → `type: "deleted"`
+2. Если не git-репозиторий → читает файл через `fs.readFileSync()`, возвращает `content`
+3. Пробует `git diff HEAD -- <file>` для staged-изменений
+4. Если diff пустой → пробует `git diff --no-index /dev/null <file>` (для новых файлов)
+5. Если всё ещё пусто → читает файл напрямую
+
+**`truncateDiff()`:** обрезает diff до `maxLines` (по умолчанию 200), сохраняя голову и хвост, с сообщением о пропущенных строках посередине.
+
+**Таймауты:** 10 секунд на git-команду, буфер до 1MB.
+
+---
+
+### 21. security/validate.ts — Защита от path traversal
+
+**Файл:** `src/security/validate.ts`
+
+Предотвращает выход за пределы рабочей директории через path traversal-атаки.
+
+**Функция:**
+
+```typescript
+function resolveSafePath(inputDir: string, workspaceDir: string): string
+```
+
+**Логика:**
+
+1. Разрешает `inputDir` относительно `workspaceDir` через `path.resolve()`
+2. Проверяет, что результат начинается с `workspaceDir` (с учётом `path.sep`)
+3. При нарушении — бросает ошибку: `Path traversal: "<inputDir>" выходит за пределы "<workspaceDir>"`
+
+**Использование:** в тулах `code_index` и `dependency_analyzer` для проверки аргумента `directory`, переданного LLM. Например, если LLM попытается передать `../../../etc/passwd`, `resolveSafePath()` заблокирует вызов.
+
+---
+
 ## Обработка ошибок
 
 ### Принцип

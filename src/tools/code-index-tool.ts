@@ -8,9 +8,7 @@ import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 import { resolveSafePath } from "../security/validate.js";
 
-export function createCodeIndexTool(config: AkameConfig, log: Logger, workspaceDir: string) {
-  const mcp = new MCPClient(config);
-
+export function createCodeIndexTool(config: AkameConfig, log: Logger, workspaceDir: string, mcp: MCPClient) {
   return tool({
     description:
       "Scan project files and create code knowledge granules in athena-memory. " +

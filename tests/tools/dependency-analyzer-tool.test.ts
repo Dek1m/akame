@@ -12,14 +12,15 @@ vi.mock("fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
 }));
 
-const mockSearch = vi.fn();
-const mockUpdate = vi.fn();
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    search: mockSearch,
-    update: mockUpdate,
-  })),
-}));
+const mockMcp = {
+  search: vi.fn(),
+  ingestBatch: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
 vi.mock("../../src/security/validate.js", () => ({
   resolveSafePath: vi.fn((dir: string, ws: string) => dir),
@@ -75,17 +76,17 @@ function makeDirEntry(name: string, isDir: boolean): fs.Dirent {
 
 describe("dependency-analyzer-tool", () => {
   beforeEach(() => {
-    mockSearch.mockReset();
-    mockUpdate.mockReset();
+    mockMcp.search.mockReset();
+    mockMcp.update.mockReset();
     vi.mocked(fs.readdirSync).mockReset();
     vi.mocked(fs.readFileSync).mockReset();
-    mockSearch.mockResolvedValue([]);
-    mockUpdate.mockResolvedValue({});
+    mockMcp.search.mockResolvedValue([]);
+    mockMcp.update.mockResolvedValue({});
   });
 
   describe("createDependencyAnalyzerTool", () => {
     it("бросает ошибку если агент не memory-granulator", async () => {
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       await expect(
         t.execute(
           { project: "akame", directory: "/ws" },
@@ -96,7 +97,7 @@ describe("dependency-analyzer-tool", () => {
 
     it("сообщает если файлов не найдено", async () => {
       vi.mocked(fs.readdirSync).mockReturnValue([]);
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -115,7 +116,7 @@ describe("dependency-analyzer-tool", () => {
         `import { foo } from "./utils/bar";`
       );
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -132,7 +133,7 @@ describe("dependency-analyzer-tool", () => {
       vi.mocked(fs.readFileSync).mockReturnValue(
         `import { helper } from "./utils/helper";\nimport React from "react";`
       );
-      mockSearch.mockResolvedValue([
+      mockMcp.search.mockResolvedValue([
         {
           id: "1",
           content: "main module",
@@ -155,7 +156,7 @@ describe("dependency-analyzer-tool", () => {
         },
       ]);
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -173,7 +174,7 @@ describe("dependency-analyzer-tool", () => {
         `import os\nfrom flask import Flask\nfrom .utils import helper\n`
       );
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -191,7 +192,7 @@ describe("dependency-analyzer-tool", () => {
         `const x = require("lodash");\nconst y = await import("moment");`
       );
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -212,7 +213,7 @@ describe("dependency-analyzer-tool", () => {
       });
       vi.mocked(fs.readFileSync).mockReturnValue(`const x = 1;`);
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -230,7 +231,7 @@ describe("dependency-analyzer-tool", () => {
         `import React from "react";\nimport { z } from "zod";\nimport * as _ from "lodash";`
       );
 
-      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws");
+      const t = createDependencyAnalyzerTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()

@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createGranulateTool, storeSessionData } from "../../src/granulator/granulate-tool.js";
 
-// Мокаем MCPClient
 const mockIngestBatch = vi.fn();
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    ingestBatch: mockIngestBatch,
-  })),
-}));
+const mockMcp = {
+  ingestBatch: mockIngestBatch,
+  search: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
 const defaultConfig = {
   mcpUrl: "http://localhost:8000/mcp",
@@ -63,19 +66,18 @@ describe("granulate-tool", () => {
         participants: ["user", "agent"],
         projectId: "akame",
       });
-      // Не падает — уже хорошо, а проверим через execute
     });
   });
 
   describe("createGranulateTool", () => {
     it("создаёт тул с правильным описанием", () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       expect(t).toBeDefined();
       expect(t.description).toContain("memory-granulator");
     });
 
     it("бросает ошибку если агент не memory-granulator", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       await expect(
         t.execute(
           { summary: "test", granules: [makeGranule()] },
@@ -85,7 +87,7 @@ describe("granulate-tool", () => {
     });
 
     it("разрешает memory-granulator", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { summary: "test", granules: [makeGranule()] },
         makeContext("memory-granulator")
@@ -94,7 +96,7 @@ describe("granulate-tool", () => {
     });
 
     it("вызывает ingestBatch для сохранения гранул", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { summary: "test", granules: [makeGranule()] },
         makeContext("memory-granulator")
@@ -103,19 +105,18 @@ describe("granulate-tool", () => {
     });
 
     it("использует project_id из аргументов если передан", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { summary: "test", project_id: "selti", granules: [makeGranule()] },
         makeContext("memory-granulator")
       );
       const callArgs = mockIngestBatch.mock.calls[0];
-      // Проверяем что project_id = selti в metadata
       const entries = callArgs[0];
       expect(entries[0].metadata.project_id).toBe("selti");
     });
 
     it("валидирует гранулы через validateGranules", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       await expect(
         t.execute(
           { summary: "test", granules: [{ content: "", namespace: "invalid", importance: 99 }] },
@@ -125,7 +126,7 @@ describe("granulate-tool", () => {
     });
 
     it("корректно собирает metadata", async () => {
-      const t = createGranulateTool(defaultConfig, mockLog);
+      const t = createGranulateTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         {
           summary: "test summary",

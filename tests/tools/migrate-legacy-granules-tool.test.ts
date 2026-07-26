@@ -3,14 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Частично тестируем extractFromContent через приватную функцию
 // и createMigrateLegacyGranulesTool
 
-const mockList = vi.fn();
-const mockUpdate = vi.fn();
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    list: mockList,
-    update: mockUpdate,
-  })),
-}));
+const mockMcp = {
+  search: vi.fn(),
+  ingestBatch: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
 import { createMigrateLegacyGranulesTool } from "../../src/tools/migrate-legacy-granules-tool.js";
 
@@ -57,22 +58,22 @@ function makeLegacyRecord(content: string, title = "", id = "id-1") {
 
 describe("migrate-legacy-granules-tool", () => {
   beforeEach(() => {
-    mockList.mockReset();
-    mockUpdate.mockReset();
-    mockUpdate.mockResolvedValue({ id: "updated" });
+    mockMcp.list.mockReset();
+    mockMcp.update.mockReset();
+    mockMcp.update.mockResolvedValue({ id: "updated" });
   });
 
   describe("createMigrateLegacyGranulesTool", () => {
     it("бросает ошибку для неавторизованного агента", async () => {
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await expect(
         t.execute({ namespace: "code_knowledge" }, makeContext("tester"))
       ).rejects.toThrow("Доступ запрещён");
     });
 
     it("разрешает memory-granulator", async () => {
-      mockList.mockResolvedValueOnce({ items: [], total: 0 });
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      mockMcp.list.mockResolvedValueOnce({ items: [], total: 0 });
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { namespace: "code_knowledge" },
         makeContext()
@@ -81,7 +82,7 @@ describe("migrate-legacy-granules-tool", () => {
     });
 
     it("мигрирует legacy запись с class (английский)", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -93,17 +94,17 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
       expect(result).toContain("Мигрировано: 1");
-      expect(mockUpdate).toHaveBeenCalledTimes(1);
+      expect(mockMcp.update).toHaveBeenCalledTimes(1);
     });
 
     it("мигрирует legacy запись с function", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -114,7 +115,7 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
@@ -123,7 +124,7 @@ describe("migrate-legacy-granules-tool", () => {
     });
 
     it("мигрирует interface", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -132,16 +133,16 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMcp.update).toHaveBeenCalled();
     });
 
     it("мигрирует type", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -150,16 +151,16 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMcp.update).toHaveBeenCalled();
     });
 
     it("мигрирует enum", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -168,16 +169,16 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMcp.update).toHaveBeenCalled();
     });
 
     it("работает в dry-run режиме", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -186,17 +187,17 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { namespace: "code_knowledge", dryRun: true, maxRecords: "10" },
         makeContext()
       );
       expect(result).toContain("dry-run");
-      expect(mockUpdate).not.toHaveBeenCalled(); // dry-run не обновляет
+      expect(mockMcp.update).not.toHaveBeenCalled(); // dry-run не обновляет
     });
 
     it("пропускает не-legacy записи (с entity_name)", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -212,7 +213,7 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
@@ -222,7 +223,7 @@ describe("migrate-legacy-granules-tool", () => {
     });
 
     it("извлекает entity_type из русского контента (класс)", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -231,16 +232,16 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMcp.update).toHaveBeenCalled();
     });
 
     it("строит links для упомянутых сущностей", async () => {
-      mockList
+      mockMcp.list
         .mockResolvedValueOnce({ items: [], total: 1 })
         .mockResolvedValueOnce({
           items: [
@@ -251,12 +252,12 @@ describe("migrate-legacy-granules-tool", () => {
           total: 1,
         });
 
-      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog);
+      const t = createMigrateLegacyGranulesTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { namespace: "code_knowledge", maxRecords: "10" },
         makeContext()
       );
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockMcp.update).toHaveBeenCalled();
     });
   });
 });

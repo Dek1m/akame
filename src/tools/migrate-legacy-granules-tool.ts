@@ -280,9 +280,7 @@ async function migrateOne(
 
 // ── Фабрика тула ──
 
-export function createMigrateLegacyGranulesTool(config: AkameConfig, log: Logger) {
-  const mcp = new MCPClient(config);
-
+export function createMigrateLegacyGranulesTool(config: AkameConfig, log: Logger, mcp: MCPClient) {
   return tool({
     description:
       "Мигрировать старые гранулы code_knowledge в новый формат. " +

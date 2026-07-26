@@ -2,6 +2,7 @@ import type { Plugin, PluginInput, PluginOptions, Hooks } from "@opencode-ai/plu
 import type { Event } from "@opencode-ai/sdk";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
+import { MCPClient } from "./mcp/client.js";
 import {
   handleSessionIdle,
   handleSessionCompacted,
@@ -27,17 +28,18 @@ const akamePlugin: Plugin = async (
 ): Promise<Hooks> => {
   const config = loadConfig();
   const log = createLogger(input.client);
+  const mcp = new MCPClient(config);
 
   log.info(`akame загружен (userId: ${config.userId}, dir: ${input.directory})`);
 
   // Создаём тулы (один раз, при загрузке плагина)
-  const granulateTool = createGranulateTool(config, log);
-  const codeIndexTool = createCodeIndexTool(config, log, input.directory);
-  const codeDiffTool = createCodeDiffTool(config, log);
-  const codeGraphTool = createCodeGraphTool(config, log);
-  const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log, input.directory);
-  const migrateLegacyGranulesTool = createMigrateLegacyGranulesTool(config, log);
-  const graphHealthTool = createGraphHealthTool(config, log);
+  const granulateTool = createGranulateTool(config, log, mcp);
+  const codeIndexTool = createCodeIndexTool(config, log, input.directory, mcp);
+  const codeDiffTool = createCodeDiffTool(config, log, mcp);
+  const codeGraphTool = createCodeGraphTool(config, log, mcp);
+  const dependencyAnalyzerTool = createDependencyAnalyzerTool(config, log, input.directory, mcp);
+  const migrateLegacyGranulesTool = createMigrateLegacyGranulesTool(config, log, mcp);
+  const graphHealthTool = createGraphHealthTool(config, log, mcp);
 
   return {
     dispose: async () => {

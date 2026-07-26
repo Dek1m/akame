@@ -1,15 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockIngestBatch = vi.hoisted(() => vi.fn());
-const mockSearch = vi.hoisted(() => vi.fn());
-const mockScanProject = vi.hoisted(() => vi.fn());
+const mockMcp = {
+  search: vi.fn(),
+  ingestBatch: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    ingestBatch: mockIngestBatch,
-    search: mockSearch,
-  })),
-}));
+const mockScanProject = vi.hoisted(() => vi.fn());
 
 vi.mock("../../src/scanner/code-index.js", () => ({
   scanProject: mockScanProject,
@@ -62,16 +63,16 @@ function makeFile(path: string, module: string, exports: Array<Record<string, un
 
 describe("code-index-tool", () => {
   beforeEach(() => {
-    mockIngestBatch.mockReset();
-    mockSearch.mockReset();
+    mockMcp.ingestBatch.mockReset();
+    mockMcp.search.mockReset();
     mockScanProject.mockReset();
-    mockIngestBatch.mockResolvedValue({ inserted: 1, skipped: 0, updated: 0 });
-    mockSearch.mockResolvedValue([]);
+    mockMcp.ingestBatch.mockResolvedValue({ inserted: 1, skipped: 0, updated: 0 });
+    mockMcp.search.mockResolvedValue([]);
   });
 
   describe("createCodeIndexTool", () => {
     it("бросает ошибку если агент не memory-granulator", async () => {
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       await expect(
         t.execute(
           { project: "akame", directory: "/ws" },
@@ -91,7 +92,7 @@ describe("code-index-tool", () => {
         timestamp: new Date().toISOString(),
       });
 
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -111,14 +112,14 @@ describe("code-index-tool", () => {
         timestamp: new Date().toISOString(),
       });
 
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
       );
       // Должен быть вызов ingestBatch
-      expect(mockIngestBatch).toHaveBeenCalled();
-      const calls = mockIngestBatch.mock.calls;
+      expect(mockMcp.ingestBatch).toHaveBeenCalled();
+      const calls = mockMcp.ingestBatch.mock.calls;
       const batch = calls[0][0];
       const modules = batch.filter(
         (g: { metadata: { entity_type: string } }) => g.metadata.entity_type === "module"
@@ -143,14 +144,14 @@ describe("code-index-tool", () => {
         timestamp: new Date().toISOString(),
       });
       // Добавляем все имена в search для кросс-ссылок
-      mockSearch.mockResolvedValue([]);
+      mockMcp.search.mockResolvedValue([]);
 
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
       );
-      expect(mockIngestBatch).toHaveBeenCalled();
+      expect(mockMcp.ingestBatch).toHaveBeenCalled();
     });
 
     it("пропускает существующие сущности", async () => {
@@ -163,7 +164,7 @@ describe("code-index-tool", () => {
         ],
         timestamp: new Date().toISOString(),
       });
-      mockSearch.mockResolvedValue([
+      mockMcp.search.mockResolvedValue([
         {
           id: "existing-1",
           content: "test",
@@ -172,7 +173,7 @@ describe("code-index-tool", () => {
         },
       ]);
 
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       const result = await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
@@ -191,15 +192,15 @@ describe("code-index-tool", () => {
         files,
         timestamp: new Date().toISOString(),
       });
-      mockSearch.mockResolvedValue([]);
+      mockMcp.search.mockResolvedValue([]);
 
-      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws");
+      const t = createCodeIndexTool(defaultConfig, mockLog, "/ws", mockMcp);
       await t.execute(
         { project: "akame", directory: "/ws" },
         makeContext()
       );
       // 10 файлов в одном модуле "src": 1 модуль + 10 сущностей = 11 гранул, maxBatch=5 → 3 батча
-      expect(mockIngestBatch.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(mockMcp.ingestBatch.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
   });
 });

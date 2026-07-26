@@ -4,14 +4,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // parseDiff и extractChanges — приватные, но проверим через createCodeDiffTool
 import { createCodeDiffTool } from "../../src/tools/code-diff-tool.js";
 
-const mockIngestBatch = vi.fn();
-const mockSearch = vi.fn();
-vi.mock("../../src/mcp/client.js", () => ({
-  MCPClient: vi.fn().mockImplementation(() => ({
-    ingestBatch: mockIngestBatch,
-    search: mockSearch,
-  })),
-}));
+const mockMcp = {
+  search: vi.fn(),
+  ingestBatch: vi.fn(),
+  update: vi.fn(),
+  list: vi.fn(),
+  recent: vi.fn(),
+  findSimilar: vi.fn(),
+  store: vi.fn(),
+};
 
 const defaultConfig = {
   mcpUrl: "http://localhost:8000/mcp",
@@ -73,15 +74,15 @@ new file mode 100644
 
 describe("code-diff-tool", () => {
   beforeEach(() => {
-    mockIngestBatch.mockReset();
-    mockSearch.mockReset();
-    mockIngestBatch.mockResolvedValue({ inserted: 1, skipped: 0, updated: 0 });
-    mockSearch.mockResolvedValue([]);
+    mockMcp.ingestBatch.mockReset();
+    mockMcp.search.mockReset();
+    mockMcp.ingestBatch.mockResolvedValue({ inserted: 1, skipped: 0, updated: 0 });
+    mockMcp.search.mockResolvedValue([]);
   });
 
   describe("createCodeDiffTool", () => {
     it("бросает ошибку если агент не memory-granulator", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       await expect(
         t.execute(
           { project: "akame", diff: "some diff" },
@@ -91,7 +92,7 @@ describe("code-diff-tool", () => {
     });
 
     it("возвращает сообщение для пустого diff", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", diff: "   " },
         makeContext()
@@ -100,17 +101,17 @@ describe("code-diff-tool", () => {
     });
 
     it("парсит diff и создаёт гранулы для функций", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", diff: sampleDiff },
         makeContext()
       );
       expect(result).toContain("анализ завершён");
-      expect(mockIngestBatch).toHaveBeenCalled();
+      expect(mockMcp.ingestBatch).toHaveBeenCalled();
     });
 
     it("парсит diff с классами, интерфейсами, типами, enum", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", diff: classDiff },
         makeContext()
@@ -119,12 +120,12 @@ describe("code-diff-tool", () => {
     });
 
     it("создаёт сводную гранулу о diff", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { project: "akame", diff: sampleDiff },
         makeContext()
       );
-      const calls = mockIngestBatch.mock.calls;
+      const calls = mockMcp.ingestBatch.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       const firstBatch = calls[0][0];
       // Первая гранула — сводка о diff
@@ -132,13 +133,13 @@ describe("code-diff-tool", () => {
     });
 
     it("обрабатывает commitHash", async () => {
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", diff: sampleDiff, commitHash: "abc123def456" },
         makeContext()
       );
       // commitHash используется в сводной грануле, проверяем что вызов был
-      expect(mockIngestBatch).toHaveBeenCalled();
+      expect(mockMcp.ingestBatch).toHaveBeenCalled();
 
     });
 
@@ -150,7 +151,7 @@ describe("code-diff-tool", () => {
 - old text
 + new text
 `;
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       const result = await t.execute(
         { project: "akame", diff: noStructDiff },
         makeContext()
@@ -159,7 +160,7 @@ describe("code-diff-tool", () => {
     });
 
     it("пропускает сущности найденные через search", async () => {
-      mockSearch.mockResolvedValue([
+      mockMcp.search.mockResolvedValue([
         {
           id: "id-1",
           content: "test",
@@ -167,12 +168,12 @@ describe("code-diff-tool", () => {
           score: 0.9,
         },
       ]);
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { project: "akame", diff: sampleDiff },
         makeContext()
       );
-      expect(mockSearch).toHaveBeenCalled();
+      expect(mockMcp.search).toHaveBeenCalled();
     });
 
     it("помечает удалённые сущности как deprecated", async () => {
@@ -183,12 +184,12 @@ describe("code-diff-tool", () => {
 -export function removedFunc() {
 -  return 1;
 `;
-      const t = createCodeDiffTool(defaultConfig, mockLog);
+      const t = createCodeDiffTool(defaultConfig, mockLog, mockMcp);
       await t.execute(
         { project: "akame", diff: removedDiff },
         makeContext()
       );
-      const calls = mockIngestBatch.mock.calls;
+      const calls = mockMcp.ingestBatch.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
     });
   });

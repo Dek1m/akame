@@ -82,9 +82,7 @@ function findCycles(
 
 // ── Фабрика тула ──
 
-export function createCodeGraphTool(config: AkameConfig, log: Logger) {
-  const mcp = new MCPClient(config);
-
+export function createCodeGraphTool(config: AkameConfig, log: Logger, mcp: MCPClient) {
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Построить граф зависимостей из code_knowledge гранул. " +

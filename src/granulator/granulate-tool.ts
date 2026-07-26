@@ -30,10 +30,9 @@ export function storeSessionData(
 
 export function createGranulateTool(
   config: AkameConfig,
-  log: Logger
+  log: Logger,
+  mcp: MCPClient
 ) {
-  const mcp = new MCPClient(config);
-
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Сохранить результаты анализа диалога в athena-memory. " +

@@ -210,10 +210,9 @@ function getModule(relPath: string): string {
 export function createDependencyAnalyzerTool(
   config: AkameConfig,
   log: Logger,
-  workspaceDir: string
+  workspaceDir: string,
+  mcp: MCPClient
 ) {
-  const mcp = new MCPClient(config);
-
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Проанализировать зависимости модулей проекта. " +

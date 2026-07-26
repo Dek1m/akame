@@ -94,9 +94,7 @@ function isUuid(s: string): boolean {
 
 // ── Фабрика тула ──
 
-export function createGraphHealthTool(config: AkameConfig, log: Logger) {
-  const mcp = new MCPClient(config);
-
+export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCPClient) {
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Проверить здоровье графа знаний. " +

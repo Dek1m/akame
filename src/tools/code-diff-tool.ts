@@ -253,9 +253,7 @@ function extractChanges(
 
 // ── Фабрика тула ──
 
-export function createCodeDiffTool(config: AkameConfig, log: Logger) {
-  const mcp = new MCPClient(config);
-
+export function createCodeDiffTool(config: AkameConfig, log: Logger, mcp: MCPClient) {
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Проанализировать diff кода и создать code_knowledge гранулы.",
