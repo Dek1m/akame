@@ -23,8 +23,10 @@ export type BatchFlushFn = (entries: PendingEntry[]) => Promise<void>;
 export class BatchAccumulator {
   private queue: PendingEntry[] = [];
   private queuedMap: Map<string, PendingEntry> = new Map();
-  private recentlyFlushed: Set<string> = new Set();
+  private recentlyFlushed: Map<string, number> = new Map(); // sessionId → timestamp
+  private readonly RECENTLY_TTL = 30_000; // 30 сек
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private flushTimerRecentlies: ReturnType<typeof setTimeout> | null = null;
   private flushing: boolean = false;
   private disposed: boolean = false;
 
@@ -32,7 +34,33 @@ export class BatchAccumulator {
     private config: AkameConfig,
     private log: Logger,
     private flushFn: BatchFlushFn,
-  ) {}
+  ) {
+    // Фоновая очистка recentlyFlushed раз в 30 сек
+    this.flushTimerRecentlies = setInterval(() => this._cleanRecentlies(), this.RECENTLY_TTL);
+  }
+
+  private _isRecentlyFlushed(sessionId: string): boolean {
+    const ts = this.recentlyFlushed.get(sessionId);
+    if (ts === undefined) return false;
+    if (Date.now() - ts > this.RECENTLY_TTL) {
+      this.recentlyFlushed.delete(sessionId);
+      return false;
+    }
+    return true;
+  }
+
+  private _addRecentlyFlushed(sessionId: string): void {
+    this.recentlyFlushed.set(sessionId, Date.now());
+  }
+
+  private _cleanRecentlies(): void {
+    const now = Date.now();
+    for (const [id, ts] of this.recentlyFlushed) {
+      if (now - ts > this.RECENTLY_TTL) {
+        this.recentlyFlushed.delete(id);
+      }
+    }
+  }
 
   // ── Геттеры ──
 
@@ -51,8 +79,8 @@ export class BatchAccumulator {
       throw new Error('BatchAccumulator is disposed');
     }
 
-    // Уже гранулировано недавно
-    if (this.recentlyFlushed.has(entry.sessionId)) {
+    // Уже гранулировано недавно (с TTL 30 сек)
+    if (this._isRecentlyFlushed(entry.sessionId)) {
       this.log.debug('batch: skip', { sessionId: entry.sessionId, eventType: 'batch', reason: 'recently flushed' });
       return;
     }
@@ -111,6 +139,10 @@ export class BatchAccumulator {
     if (this.flushTimer !== null) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
+    }
+    if (this.flushTimerRecentlies !== null) {
+      clearInterval(this.flushTimerRecentlies);
+      this.flushTimerRecentlies = null;
     }
 
     const err = new Error('BatchAccumulator disposed');
@@ -183,10 +215,10 @@ export class BatchAccumulator {
       if (watchdog) clearTimeout(watchdog);
       watchdog = null;
 
-      // Успех — резолвим все, добавляем в recentlyFlushed
+      // Успех — резолвим все, добавляем в recentlyFlushed (TTL 30 сек)
       for (const entry of batch) {
         entry.resolve();
-        this.recentlyFlushed.add(entry.sessionId);
+        this._addRecentlyFlushed(entry.sessionId);
       }
 
       this.log.info('batch: flushed', { batchSize: batch.length });

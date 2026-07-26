@@ -33,14 +33,18 @@ export abstract class BaseEventHandler {
     context: GranulateContext,
     entry: BatchEntry
   ): Promise<void> {
+    console.log("[akame-diag] batchOrDirect: batchProcessor=" + (this.batchProcessor ? "yes" : "no") + ", engine=" + (this.granulationEngine ? "yes" : "no") + ", sessionId=" + context.sessionId);
     if (this.batchProcessor) {
       await this.batchProcessor.enqueue(entry, context);
+      console.log("[akame-diag] batchOrDirect: enqueued to batch");
     } else if (this.granulationEngine) {
       await this.granulationEngine.granulate(this.input, context);
+      console.log("[akame-diag] batchOrDirect: granulated directly");
     } else {
       // fallback для legacy обёрток
       const { granulate } = await import("../granulator/engine.js");
       await granulate(this.input, context, this.config, this.log);
+      console.log("[akame-diag] batchOrDirect: fallback granulate called");
     }
   }
 }

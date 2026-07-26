@@ -61,12 +61,21 @@ export class ToolHandler extends BaseEventHandler {
     toolInput: ToolExecuteAfterInput,
     toolOutput: ToolExecuteAfterOutput
   ): Promise<void> {
-    if (!this.config.granulateTool) return;
+    console.log("[akame-diag] handleAfter called, tool=" + toolInput.tool + ", sessionID=" + toolInput.sessionID);
+
+    if (!this.config.granulateTool) {
+      console.log("[akame-diag] handleAfter: granulateTool=false, skipping");
+      return;
+    }
 
     const toolName = (toolInput.tool || "").toLowerCase();
+    console.log("[akame-diag] handleAfter: toolName=" + toolName + ", isGranulatable=" + isGranulatableTool(toolName));
 
     // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
-    if (!isGranulatableTool(toolName)) return;
+    if (!isGranulatableTool(toolName)) {
+      console.log("[akame-diag] handleAfter: not granulatable, skipping");
+      return;
+    }
 
     const args = toolInput.args || {};
     const command = String(args.command || args.cmd || args._ || "").toLowerCase();
@@ -103,17 +112,40 @@ export class ToolHandler extends BaseEventHandler {
     // Грануляция результата
     try {
       const resultText = extractResultText(toolOutput);
+      const _isGeraTool = isGranulatableTool(toolName) && !isGitTool;
 
-      if (!resultText || resultText.length < 10) {
-        this.log.debug('Пустой результат тула', { toolName, eventType: 'tool' });
+      // Для Gera-тулов opencode не передаёт результат MCP-вызова,
+      // поэтому используем аргументы запроса как контекст
+      if (_isGeraTool) {
+        const queryInfo = String(args.query || args.url || "").slice(0, 200);
+        this.log.info('Gera tool result (empty — MCP), using args', { toolName, query: queryInfo, eventType: 'tool' });
+
+        const title = `## Gera ${toolName}: ${queryInfo}`;
+        const context: GranulateContext = {
+          sessionId: toolInput.sessionID || `tool_${Date.now()}`,
+          agent: "tool.execute.after",
+          projectId: this.config.userId,
+          mode: "tool_result",
+          messages: [{ id: `${toolName}_${Date.now()}`, role: "system", content: title }],
+          participants: [toolName, "Gera"],
+        };
+
+        await this.batchOrDirect(context, {
+          sessionId: context.sessionId,
+          event: "tool",
+          enqueuedAt: Date.now(),
+        });
         return;
       }
 
-      // Формируем контекст в зависимости от типа тула (по суффиксу)
-      const _isGeraTool = isGranulatableTool(toolName) && !isGitTool;
-      const title = _isGeraTool
-        ? `## Gera ${toolName}: ${String(args.query || args.url || "").slice(0, 200)}\n## Результат:\n${resultText.slice(0, 3000)}`
-        : `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
+      // Для git-тулов проверяем, что результат не пустой
+      if (!resultText || resultText.length < 10) {
+        this.log.debug('Пустой результат git тула', { toolName, eventType: 'tool' });
+        return;
+      }
+
+      // Формируем контекст для git-тулов
+      const title = `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
 
       const context: GranulateContext = {
         sessionId: toolInput.sessionID || `tool_${Date.now()}`,
@@ -130,11 +162,13 @@ export class ToolHandler extends BaseEventHandler {
         participants: _isGeraTool ? [toolName, "Gera"] : [toolName, "git"],
       };
 
+      console.log("[akame-diag] calling batchOrDirect, sessionId=" + context.sessionId + ", toolName=" + toolName);
       await this.batchOrDirect(context, {
         sessionId: context.sessionId,
         event: "tool",
         enqueuedAt: Date.now(),
       });
+      console.log("[akame-diag] batchOrDirect completed");
     } catch (err) {
       this.log.error('tool.execute.after ошибка грануляции', { toolName, eventType: 'tool', error: err instanceof Error ? err.message : String(err) });
     }
