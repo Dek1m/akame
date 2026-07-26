@@ -3,11 +3,11 @@
 // Обогащает свежие гранулы кросс-неймспейсными связями через findSimilar.
 // Контролируется фича-флагом config.enrichLinks (по умолчанию false).
 
-import { MCPClient } from "../mcp/client.js";
-import type { AkameConfig } from "../constants.js";
+import type { AkameConfig } from "../config/schema.js";
 import type { Logger } from "../logger.js";
 import type { GranulateContext } from "./engine.js";
 import type { CodeLink, LinkType } from "./schema.js";
+import type { MCPClient } from "../mcp/client.js";
 
 // ── CNLM-матрица: Cross-Namespace Link Matrix ──
 // source namespace → target namespaces для поиска
@@ -56,14 +56,14 @@ function determineLinkType(sourceNs: string, targetNs: string): LinkType {
 export async function enrichLinks(
   context: GranulateContext,
   config: AkameConfig,
-  log: Logger
+  log: Logger,
+  mcp: MCPClient
 ): Promise<void> {
   if (!config.enrichLinks) {
-    log.debug("link-enricher: отключён (enrichLinks=false)");
+    log.debug("link-enricher: отключён", { enrichLinks: false });
     return;
   }
 
-  const mcp = new MCPClient(config);
   const startTime = Date.now();
 
   try {
@@ -77,15 +77,11 @@ export async function enrichLinks(
     );
 
     if (newGranules.length === 0) {
-      log.debug(
-        `link-enricher: нет новых гранул для сессии ${context.sessionId}`
-      );
+      log.debug('link-enricher: нет новых гранул', { sessionId: context.sessionId });
       return;
     }
 
-    log.info(
-      `link-enricher: ${newGranules.length} гранул для обогащения`
-    );
+    log.info('link-enricher: гранул для обогащения', { granuleCount: newGranules.length });
 
     let totalLinksCreated = 0;
     const nsAffected = new Set<string>();
@@ -159,19 +155,13 @@ export async function enrichLinks(
         totalLinksCreated += newLinks.length;
         nsAffected.add(ns);
 
-        log.debug(
-          `link-enricher: +${newLinks.length} связей для ${String(meta?.entity_name ?? granule.id.slice(0, 8))}`
-        );
+        log.debug('link-enricher: связи созданы', { linkCount: newLinks.length, entityName: String(meta?.entity_name ?? granule.id.slice(0, 8)) });
       }
     }
 
-    const duration = Date.now() - startTime;
-    log.info(
-      `link-enricher: создано ${totalLinksCreated} связей, затронуто ${nsAffected.size} namespace, за ${duration}ms`
-    );
+    const durationMs = Date.now() - startTime;
+    log.info('link-enricher: завершён', { totalLinksCreated, namespacesAffected: nsAffected.size, durationMs });
   } catch (err) {
-    log.error(
-      `link-enricher: ошибка — ${err instanceof Error ? err.message : String(err)}`
-    );
+    log.error('link-enricher: ошибка', { error: err instanceof Error ? err.message : String(err) });
   }
 }

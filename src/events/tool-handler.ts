@@ -1,9 +1,10 @@
 import type { PluginInput } from "@opencode-ai/plugin";
+import type { Event } from "@opencode-ai/sdk";
 import type { Logger } from "../logger.js";
 import type { AkameConfig } from "../constants.js";
-import { granulate, type GranulateContext } from "../granulator/engine.js";
-import { getAccumulator } from "../granulator/batch-accumulator.js";
-import type { BatchEntry } from "../granulator/batch-accumulator.js";
+import { type GranulateContext, type GranulationEngine } from "../granulator/engine.js";
+import type { BatchEntry, BatchAccumulator } from "../granulator/batch-accumulator.js";
+import { BaseEventHandler } from "./base-handler.js";
 
 // Инструменты, результаты которых гранулируются
 // (проверка по суффиксу — чтобы работали MCP-префиксы)
@@ -30,103 +31,135 @@ interface ToolExecuteAfterOutput {
   result: unknown;
 }
 
+interface CommandExecutedInput {
+  command: string;
+  sessionID: string;
+}
+
 let toolCounter = 0;
 
-export async function handleToolExecuteAfter(
-  input: PluginInput,
-  toolInput: ToolExecuteAfterInput,
-  toolOutput: ToolExecuteAfterOutput,
-  config: AkameConfig,
-  log: Logger
-): Promise<void> {
-  if (!config.granulateTool) return;
+// ── Класс ToolHandler ──
 
-  const toolName = (toolInput.tool || "").toLowerCase();
+export class ToolHandler extends BaseEventHandler {
+  readonly supportedEvents = ["command.executed"];
 
-  // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
-  if (!isGranulatableTool(toolName)) return;
-
-  const args = toolInput.args || {};
-  const command = String(args.command || args.cmd || args._ || "").toLowerCase();
-
-  // Для git-тулов проверяем, что команда git-связана
-  const isGitTool = isGranulatableTool(toolName) && (toolName === "git" || toolName === "bash" || toolName === "gh" || toolName.endsWith("_git") || toolName.endsWith("_bash") || toolName.endsWith("_gh"));
-  if (isGitTool) {
-    const isGitCommand =
-      command.includes("git ") ||
-      command.startsWith("git") ||
-      command.includes("gh ") ||
-      command.includes("push") ||
-      command.includes("commit") ||
-      command.includes("merge") ||
-      command.includes("pr") ||
-      (args._ && Array.isArray(args._) && (args._ as string[]).some(
-        (a: string) =>
-          a === "git" || a === "gh" || a === "push" || a === "commit"
-      ));
-
-    if (!isGitCommand) return;
+  constructor(
+    input: PluginInput,
+    config: AkameConfig,
+    log: Logger,
+    batchProcessor: BatchAccumulator | null = null,
+    granulationEngine: GranulationEngine | null = null,
+  ) {
+    super(input, config, log, batchProcessor, granulationEngine);
   }
 
-  toolCounter++;
-  // Определяем тип тула по суффиксу (Gera или git)
-  const isGeraTool = isGranulatableTool(toolName) && !isGitTool;
-  if (isGeraTool) {
-    const query = String(args.query || args.url || "");
-    log.info(
-      `tool.execute.after (Gera): ${toolName} #${toolCounter}, запрос: ${query.slice(0, 100)}`
-    );
-  } else {
-    log.info(
-      `tool.execute.after (git): ${toolName} #${toolCounter}, команда: ${command.slice(0, 100)}`
-    );
+  async handle(event: Event): Promise<void> {
+    return this.handleCommandExecuted(event as unknown as CommandExecutedInput);
   }
 
-  // Грануляция результата
-  try {
-    const resultText = extractResultText(toolOutput);
+  async handleAfter(
+    toolInput: ToolExecuteAfterInput,
+    toolOutput: ToolExecuteAfterOutput
+  ): Promise<void> {
+    if (!this.config.granulateTool) return;
 
-    if (!resultText || resultText.length < 10) {
-      log.debug(`Пустой результат тула: ${toolName}`);
-      return;
+    const toolName = (toolInput.tool || "").toLowerCase();
+
+    // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
+    if (!isGranulatableTool(toolName)) return;
+
+    const args = toolInput.args || {};
+    const command = String(args.command || args.cmd || args._ || "").toLowerCase();
+
+    // Для git-тулов проверяем, что команда git-связана
+    const isGitTool = isGranulatableTool(toolName) && (toolName === "git" || toolName === "bash" || toolName === "gh" || toolName.endsWith("_git") || toolName.endsWith("_bash") || toolName.endsWith("_gh"));
+    if (isGitTool) {
+      const isGitCommand =
+        command.includes("git ") ||
+        command.startsWith("git") ||
+        command.includes("gh ") ||
+        command.includes("push") ||
+        command.includes("commit") ||
+        command.includes("merge") ||
+        command.includes("pr") ||
+        (args._ && Array.isArray(args._) && (args._ as string[]).some(
+          (a: string) =>
+            a === "git" || a === "gh" || a === "push" || a === "commit"
+        ));
+
+      if (!isGitCommand) return;
     }
 
-    // Формируем контекст в зависимости от типа тула (по суффиксу)
+    toolCounter++;
+    // Определяем тип тула по суффиксу (Gera или git)
     const isGeraTool = isGranulatableTool(toolName) && !isGitTool;
-    const title = isGeraTool
-      ? `## Gera ${toolName}: ${String(args.query || args.url || "").slice(0, 200)}\n## Результат:\n${resultText.slice(0, 3000)}`
-      : `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
+    if (isGeraTool) {
+      const query = String(args.query || args.url || "");
+      this.log.info('tool.execute.after', { toolName, eventType: 'tool', toolCounter, query: query.slice(0, 100) });
+    } else {
+      this.log.info('tool.execute.after', { toolName, eventType: 'tool', toolCounter, command: command.slice(0, 100) });
+    }
 
-    const context: GranulateContext = {
-      sessionId: toolInput.sessionID || `tool_${Date.now()}`,
-      agent: "tool.execute.after",
-      projectId: config.userId,
-      mode: "tool_result",
-      messages: [
-        {
-          id: `${toolName}_${Date.now()}`,
-          role: "system",
-          content: title,
-        },
-      ],
-      participants: isGeraTool ? [toolName, "Gera"] : [toolName, "git"],
-    };
+    // Грануляция результата
+    try {
+      const resultText = extractResultText(toolOutput);
 
-    if (config.batchEnabled) {
-      const acc = getAccumulator();
-      const batchEntry: BatchEntry = {
+      if (!resultText || resultText.length < 10) {
+        this.log.debug('Пустой результат тула', { toolName, eventType: 'tool' });
+        return;
+      }
+
+      // Формируем контекст в зависимости от типа тула (по суффиксу)
+      const _isGeraTool = isGranulatableTool(toolName) && !isGitTool;
+      const title = _isGeraTool
+        ? `## Gera ${toolName}: ${String(args.query || args.url || "").slice(0, 200)}\n## Результат:\n${resultText.slice(0, 3000)}`
+        : `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
+
+      const context: GranulateContext = {
+        sessionId: toolInput.sessionID || `tool_${Date.now()}`,
+        agent: "tool.execute.after",
+        projectId: this.config.userId,
+        mode: "tool_result",
+        messages: [
+          {
+            id: `${toolName}_${Date.now()}`,
+            role: "system",
+            content: title,
+          },
+        ],
+        participants: _isGeraTool ? [toolName, "Gera"] : [toolName, "git"],
+      };
+
+      await this.batchOrDirect(context, {
         sessionId: context.sessionId,
         event: "tool",
         enqueuedAt: Date.now(),
-      };
-      await acc.enqueue(batchEntry, context);
-    } else {
-      await granulate(input, context, config, log);
+      });
+    } catch (err) {
+      this.log.error('tool.execute.after ошибка грануляции', { toolName, eventType: 'tool', error: err instanceof Error ? err.message : String(err) });
     }
-  } catch (err) {
-    log.error(
-      `tool.execute.after ошибка грануляции: ${err instanceof Error ? err.message : String(err)}`
-    );
+  }
+
+  async handleBefore(
+    toolInput: ToolExecuteAfterInput,
+    _toolOutput: Record<string, unknown>
+  ): Promise<void> {
+    if (!this.config.granulateToolBefore) return;
+
+    const toolName = (toolInput.tool || "").toLowerCase();
+
+    // Пока только логируем важные вызовы
+    this.log.debug('tool.execute.before', { toolName, sessionId: toolInput.sessionID, eventType: 'tool' });
+  }
+
+  private async handleCommandExecuted(event: CommandExecutedInput): Promise<void> {
+    if (!this.config.granulateCommand) return;
+
+    if (!event.command) return;
+
+    this.log.info('command.executed', { eventType: 'command', command: event.command.slice(0, 100), sessionId: event.sessionID });
+
+    // Здесь в будущем: грануляция пользовательских команд
   }
 }
 
@@ -153,7 +186,18 @@ function extractResultText(output: ToolExecuteAfterOutput): string {
   return String(result ?? "");
 }
 
-// ── tool.execute.before — pre-processing перед выполнением тула ──
+// ── Старые функции-обёртки (для обратной совместимости) ──
+
+export async function handleToolExecuteAfter(
+  input: PluginInput,
+  toolInput: ToolExecuteAfterInput,
+  toolOutput: ToolExecuteAfterOutput,
+  config: AkameConfig,
+  log: Logger
+): Promise<void> {
+  const handler = new ToolHandler(input, config, log);
+  return handler.handleAfter(toolInput, toolOutput);
+}
 
 export async function handleToolExecuteBefore(
   _input: PluginInput,
@@ -162,21 +206,8 @@ export async function handleToolExecuteBefore(
   config: AkameConfig,
   log: Logger
 ): Promise<void> {
-  if (!config.granulateToolBefore) return;
-
-  const toolName = (toolInput.tool || "").toLowerCase();
-
-  // Пока только логируем важные вызовы
-  log.debug(
-    `tool.execute.before: ${toolName}, сессия: ${toolInput.sessionID}`
-  );
-}
-
-// ── command.executed — пользователь выполнил команду ──
-
-interface CommandExecutedInput {
-  command: string;
-  sessionID: string;
+  const handler = new ToolHandler(_input, config, log);
+  return handler.handleBefore(toolInput, _toolOutput);
 }
 
 export async function handleCommandExecuted(
@@ -185,12 +216,6 @@ export async function handleCommandExecuted(
   config: AkameConfig,
   log: Logger
 ): Promise<void> {
-  if (!config.granulateCommand) return;
-
-  const cmd = event as CommandExecutedInput;
-  if (!cmd.command) return;
-
-  log.info(`command.executed: ${cmd.command.slice(0, 100)}`);
-
-  // Здесь в будущем: грануляция пользовательских команд
+  const handler = new ToolHandler(_input, config, log);
+  return handler.handle(event as Event);
 }

@@ -39,6 +39,12 @@ const mockLog = {
   debug: vi.fn(),
 };
 
+const mockMCP = {
+  recent: mockRecent,
+  findSimilar: mockFindSimilar,
+  update: mockUpdate,
+} as unknown as import("../../src/mcp/client.js").MCPClient;
+
 function makeGranule(overrides: Record<string, unknown> = {}) {
   return {
     id: "gran-1",
@@ -71,11 +77,13 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         config,
-        mockLog
+        mockLog,
+        mockMCP
       );
       expect(mockRecent).not.toHaveBeenCalled();
       expect(mockLog.debug).toHaveBeenCalledWith(
-        expect.stringContaining("отключён")
+        "link-enricher: отключён",
+        expect.objectContaining({ enrichLinks: false })
       );
     });
 
@@ -86,7 +94,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       expect(mockUpdate).not.toHaveBeenCalled();
     });
@@ -98,7 +107,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       // Не должен вызывать findSimilar для importance=1
       expect(mockFindSimilar).not.toHaveBeenCalled();
@@ -114,7 +124,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       expect(mockFindSimilar).toHaveBeenCalled();
       expect(mockUpdate).toHaveBeenCalled();
@@ -135,7 +146,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       // Уже 5 связей — не должен искать новые
       expect(mockFindSimilar).not.toHaveBeenCalled();
@@ -151,7 +163,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       // Не должен добавить ссылку на самого себя
       const updateCalls = mockUpdate.mock.calls;
@@ -171,7 +184,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       // Должен вызывать findSimilar для project_meta (из CNLM_MATRIX)
       expect(mockFindSimilar).toHaveBeenCalled();
@@ -188,7 +202,8 @@ describe("link-enricher", () => {
       await enrichLinks(
         { sessionId: "sess-1", agent: "test", projectId: "akame", messages: [], participants: [] },
         defaultConfig,
-        mockLog
+        mockLog,
+        mockMCP
       );
       expect(mockLog.error).toHaveBeenCalled();
     });

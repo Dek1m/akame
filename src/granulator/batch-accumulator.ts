@@ -53,7 +53,7 @@ export class BatchAccumulator {
 
     // Уже гранулировано недавно
     if (this.recentlyFlushed.has(entry.sessionId)) {
-      this.log.debug(`batch: skip ${entry.sessionId} — recently flushed`);
+      this.log.debug('batch: skip', { sessionId: entry.sessionId, eventType: 'batch', reason: 'recently flushed' });
       return;
     }
 
@@ -69,7 +69,7 @@ export class BatchAccumulator {
         existing.reject(new Error('Replaced by higher-priority event'));
       } else if (existing.event === 'compacted' && entry.event === 'idle') {
         // skip: idle не заменяет compacted
-        this.log.debug(`batch: skip ${entry.sessionId} — compacted already queued`);
+        this.log.debug('batch: skip', { sessionId: entry.sessionId, eventType: 'batch', reason: 'compacted already queued' });
         return;
       } else {
         // Добавить (разные события для одной сессии)
@@ -168,7 +168,7 @@ export class BatchAccumulator {
         if (this.flushing) {
           this.flushing = false;
           const error = new Error(`Watchdog: flush timeout ${this.FLUSH_TIMEOUT_MS}ms`);
-          this.log.error(`batch: watchdog flush timeout — ${batch.length} entries lost`);
+          this.log.error('batch: watchdog flush timeout', { batchSize: batch.length });
           for (const entry of batch) {
             entry.reject(error);
           }
@@ -177,7 +177,7 @@ export class BatchAccumulator {
     }
 
     try {
-      this.log.debug(`batch: flushing ${batch.length} entries`);
+      this.log.debug('batch: flushing', { batchSize: batch.length });
       await this.flushFn(batch);
 
       if (watchdog) clearTimeout(watchdog);
@@ -189,13 +189,13 @@ export class BatchAccumulator {
         this.recentlyFlushed.add(entry.sessionId);
       }
 
-      this.log.info(`batch: flushed ${batch.length} entries successfully`);
+      this.log.info('batch: flushed', { batchSize: batch.length });
     } catch (err) {
       if (watchdog) clearTimeout(watchdog);
       watchdog = null;
 
       const error = err instanceof Error ? err : new Error(String(err));
-      this.log.error(`batch: flush failed — ${error.message}`);
+      this.log.error('batch: flush failed', { batchSize: batch.length, error: error.message });
 
       // Ошибка — реджектим все
       for (const entry of batch) {
@@ -224,23 +224,3 @@ export class BatchAccumulator {
   }
 }
 
-// ── Module-level singleton ──
-
-let _instance: BatchAccumulator | null = null;
-
-export function initAccumulator(acc: BatchAccumulator): void {
-  _instance = acc;
-}
-
-export function getAccumulator(): BatchAccumulator {
-  if (!_instance) {
-    throw new Error(
-      'BatchAccumulator не инициализирован. Вызови initAccumulator() перед использованием.',
-    );
-  }
-  return _instance;
-}
-
-export function resetAccumulator(): void {
-  _instance = null;
-}

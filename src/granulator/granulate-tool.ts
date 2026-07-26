@@ -9,9 +9,10 @@ import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 
 // ── Module-level store для данных сессий ──
-// Сохраняем при session.idle, забираем при вызове тула
+// Сохраняем при granulate(), забираем при вызове тула
+// Используется GranulationEngine для синхронизации
 
-interface SessionData {
+export interface SessionData {
   messages: { id: string; role: string; content: string }[];
   participants: string[];
   projectId: string;
@@ -158,16 +159,14 @@ export function createGranulateTool(
       const caller = context.agent || "unknown";
       if (caller !== "memory-granulator") {
         const errMsg = `Доступ запрещён: агент "${caller}" не имеет права вызывать granulate_output. Только memory-granulator (Тишь) может писать в athena-memory.`;
-        log.warn(errMsg);
+        log.warn(errMsg, { caller });
         throw new Error(errMsg);
       }
 
       const lookupId = args.session_id || context.sessionID;
       const sessionData = sessionStore.get(lookupId);
 
-      log.info(
-        `granulate_output: ${args.granules.length} гранул, summary: "${args.summary.slice(0, 80)}"`
-      );
+      log.info('granulate_output', { granuleCount: args.granules.length, summary: args.summary.slice(0, 80) });
 
       // Формируем объект для валидации
       const granulesInput = {
@@ -203,7 +202,7 @@ export function createGranulateTool(
 
       // Валидация по расширенной схеме
       const validated = validateGranules(granulesInput);
-      log.debug(`Валидация пройдена: ${validated.granules.length} гранул`);
+      log.debug('Валидация пройдена', { granuleCount: validated.granules.length });
 
       // Отправка в athena-memory
       const entries = validated.granules.map((g) => ({
@@ -218,13 +217,9 @@ export function createGranulateTool(
         try {
           const result = await mcp.ingestBatch(batch, config.userId);
           totalInserted += result.inserted;
-          log.debug(
-            `MCP batch: ${result.inserted} вставлено, ${result.skipped} пропущено, ${result.updated} обновлено`
-          );
+          log.debug('MCP batch', { inserted: result.inserted, skipped: result.skipped, updated: result.updated });
         } catch (err) {
-          log.error(
-            `MCP ошибка: ${err instanceof Error ? err.message : String(err)}`
-          );
+          log.error('MCP ошибка', { error: err instanceof Error ? err.message : String(err) });
         }
       }
 

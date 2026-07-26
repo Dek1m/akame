@@ -34,9 +34,7 @@ function gitDiffStaged(filePath: string, log?: Logger): string {
     });
     return result.stdout || "";
   } catch (err) {
-    log?.debug(
-      `git diff HEAD не удался: ${err instanceof Error ? err.message : String(err)}`
-    );
+    log?.debug('git diff HEAD не удался', { filePath, error: err instanceof Error ? err.message : String(err) });
     return "";
   }
 }
@@ -57,9 +55,7 @@ function gitDiffNew(filePath: string, log?: Logger): string {
     );
     return result.stdout || "";
   } catch (err) {
-    log?.debug(
-      `git diff --no-index не удался: ${err instanceof Error ? err.message : String(err)}`
-    );
+    log?.debug('git diff --no-index не удался', { filePath, error: err instanceof Error ? err.message : String(err) });
     return "";
   }
 }
@@ -81,13 +77,11 @@ export function getGitDiff(filePath: string, log?: Logger): DiffResult {
 
   // Не git-репозиторий — просто читаем файл
   if (!isGitRepo()) {
-    log?.debug("Не git-репозиторий, читаем файл напрямую");
+    log?.debug("Не git-репозиторий, читаем файл напрямую", { filePath });
     try {
       content = fs.readFileSync(filePath, "utf-8");
     } catch (readErr) {
-      log?.debug(
-        `Не удалось прочитать файл: ${readErr instanceof Error ? readErr.message : String(readErr)}`
-      );
+      log?.debug('Не удалось прочитать файл', { filePath, error: readErr instanceof Error ? readErr.message : String(readErr) });
     }
     return { diff: "", filePath, type: exists ? "modified" : "deleted", content };
   }

@@ -27,49 +27,7 @@ export const EXCLUDE_DIRS = new Set([
   "coverage",
 ]);
 
-// ── Дефолты конфигурации ──
-export const DEFAULTS = {
-  MCP_URL: "http://athena-memory:8000/mcp/",
-  USER_ID: "akame",
-  GRANULATE_IDLE: true,
-  GRANULATE_FILE: false,
-  GRANULATE_TOOL: true,
-  GRANULATE_COMPACTED: true,
-  GRANULATE_DIFF: false,
-  GRANULATE_FILE_WATCHER: false,
-  GRANULATE_TOOL_BEFORE: false,
-  GRANULATE_COMMAND: false,
-  COOLDOWN_MS: 30000,
-  DEBOUNCE_MS: 2000,
-  MAX_BATCH: 20,
-  MAX_MESSAGES: 50,
-  ENRICH_LINKS: true,
-  ENRICH_PROMPT: true,
-  BATCH_ENABLED: true,
-  BATCH_SIZE: 5,
-  BATCH_MAX_AGE_MS: 60_000,
-} as const;
-
-// ── Типы конфигурации плагина ──
-export interface AkameConfig {
-  mcpUrl: string;
-  apiKey?: string;
-  userId: string;
-  granulateIdle: boolean;
-  granulateFile: boolean;
-  granulateTool: boolean;
-  granulateCompacted: boolean;
-  granulateDiff: boolean;
-  granulateFileWatcher: boolean;
-  granulateToolBefore: boolean;
-  granulateCommand: boolean;
-  cooldownMs: number;
-  debounceMs: number;
-  maxBatch: number;
-  maxMessages: number;
-  enrichLinks: boolean;
-  enrichPrompt: boolean;
-  batchEnabled: boolean;
-  batchSize: number;
-  batchMaxAgeMs: number;
-}
+// ── Обратная совместимость ──
+// Новый код использует AkameConfig из src/config/schema.ts
+export { AkameConfig } from "./config/schema.js";
+export type { TriggerConfig, BatchConfig, CooldownConfig, EnrichConfig, MCPConfig } from "./config/types.js";

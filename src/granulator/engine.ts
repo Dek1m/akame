@@ -1,12 +1,16 @@
-import fs from "fs";
-import path from "path";
+// ── GranulationEngine — ядро грануляции знаний ──
+// Фаза 5: рефакторинг в класс с PromptBuilder и keyword-extractor
+
 import type { PluginInput } from "@opencode-ai/plugin";
-import type { AkameConfig } from "../constants.js";
+import type { AkameConfig } from "../config/schema.js";
 import type { Logger } from "../logger.js";
 import { MCPClient } from "../mcp/client.js";
-import type { PendingEntry } from "./batch-accumulator.js";
-import { storeSessionData } from "./granulate-tool.js";
+import { PromptBuilder } from "./prompt-builder.js";
 import { enrichLinks } from "./link-enricher.js";
+import type { PendingEntry } from "./batch-accumulator.js";
+import { storeSessionData as toolStoreSessionData, type SessionData } from "./granulate-tool.js";
+
+// ── Типы ──
 
 export interface GranulateContext {
   sessionId: string;
@@ -17,53 +21,358 @@ export interface GranulateContext {
   mode?: "dialogue" | "code_diff" | "tool_result";
 }
 
-// ── Чтение промпта для грануляции ──
+// Реэкспорт для обратной совместимости
+export type { SessionData };
 
-let cachedPrompt: string | null = null;
-let cachedPromptMtime: number = 0;
+// ── Module-level Set для legacy isServiceSession ──
 
-function getSystemPrompt(log?: Logger): string {
-  try {
-    const homeDir = process.env.HOME || "/home/opencode";
-    const promptPath = path.join(
-      homeDir,
-      ".config",
-      "opencode",
-      "agents",
-      "memory-granulator.md"
-    );
-    if (fs.existsSync(promptPath)) {
-      const mtime = fs.statSync(promptPath).mtimeMs;
-      if (cachedPrompt === null || mtime > cachedPromptMtime) {
-        cachedPrompt = fs.readFileSync(promptPath, "utf-8");
-        cachedPromptMtime = mtime;
-      }
-      return cachedPrompt;
-    }
-  } catch (err) {
-    log?.debug(`prompt file не удалось прочитать: ${err instanceof Error ? err.message : String(err)}`);
+const _legacyServiceSessions = new Set<string>();
+
+// ── Класс GranulationEngine ──
+
+export class GranulationEngine {
+  private config: AkameConfig;
+  private log: Logger;
+  private mcp: MCPClient;
+  private promptBuilder: PromptBuilder;
+  private serviceSessions: Set<string> = new Set();
+  private sessionDataStore: Map<string, SessionData> = new Map();
+  private static readonly LLM_TIMEOUT_MS = 120_000; // 2 минуты
+  private static readonly STORE_TTL = 10 * 60 * 1000; // 10 минут
+  private static readonly MIN_MESSAGES = 3;
+
+  constructor(
+    config: AkameConfig,
+    log: Logger,
+    mcp: MCPClient,
+    promptBuilder: PromptBuilder
+  ) {
+    this.config = config;
+    this.log = log;
+    this.mcp = mcp;
+    this.promptBuilder = promptBuilder;
   }
 
-  return `Ты — Тишь, специалист по грануляции знаний команды Argenta Team.
-Твоя задача — анализировать диалоги и извлекать из них структурированные гранулы знаний.
+  // ── Основной метод грануляции ──
 
-Правила:
-1. Извлекай только существенную информацию
-2. Каждая гранула должна быть самодостаточна
-3. Разделяй гранулы по namespace: user_facts, project_meta, dialogue_insights, code_knowledge
-4. Оценивай importance от 1 до 5
-5. Используй инструмент granulate_output для сохранения результатов`;
+  async granulate(
+    input: PluginInput,
+    context: GranulateContext
+  ): Promise<void> {
+    const startTime = Date.now();
+    this.log.info('granulate', {
+      sessionId: context.sessionId,
+      mode: context.mode,
+      messageCount: context.messages.length,
+    });
+
+    try {
+      const messages = this.promptBuilder.truncateMessages(
+        context.messages,
+        this.config.maxMessages
+      );
+
+      if (messages.length === 0) {
+        this.log.debug("Нет сообщений для грануляции", {
+          sessionId: context.sessionId,
+        });
+        return;
+      }
+
+      // Пропускаем слишком короткие диалоги — нечего гранулировать
+      if (!context.mode && messages.length < GranulationEngine.MIN_MESSAGES) {
+        this.log.debug('Слишком мало сообщений для грануляции', {
+          sessionId: context.sessionId,
+          messageCount: messages.length,
+          minMessages: GranulationEngine.MIN_MESSAGES,
+        });
+        return;
+      }
+
+      // Сохраняем данные сессии для тула granulate_output
+      this.storeSessionData(context.sessionId, {
+        messages,
+        participants: context.participants,
+        projectId: context.projectId,
+      });
+
+      // Синхронизируем с legacy store для granulate-tool.ts
+      toolStoreSessionData(context.sessionId, {
+        messages,
+        participants: context.participants,
+        projectId: context.projectId,
+      });
+
+      const systemPrompt = this.promptBuilder.buildSystem();
+      let userPrompt: string;
+
+      switch (context.mode) {
+        case "code_diff":
+          userPrompt = this.promptBuilder.buildCodeDiff(context);
+          break;
+        case "tool_result":
+          userPrompt = this.promptBuilder.buildToolResult(context);
+          break;
+        default:
+          userPrompt = await this.promptBuilder.buildDialogue(context);
+      }
+
+      await this.callLLM(input, systemPrompt, userPrompt);
+
+      const durationMs = Date.now() - startTime;
+      this.log.info('granulate.complete', {
+        sessionId: context.sessionId,
+        durationMs,
+        mode: context.mode,
+      });
+
+      // Пост-обработка: автоматическое cross-namespace связывание
+      if (this.config.enrichLinks) {
+        try {
+          await enrichLinks(context, this.config, this.log, this.mcp);
+        } catch (linkErr) {
+          this.log.debug('enrichLinks ошибка', {
+            error: linkErr instanceof Error ? linkErr.message : String(linkErr),
+          });
+        }
+      }
+    } catch (err) {
+      const durationMs = Date.now() - startTime;
+      this.log.error('granulate.error', {
+        sessionId: context.sessionId,
+        durationMs,
+        mode: context.mode,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // ── Batch Granulation ──
+
+  async granulateBatch(
+    input: PluginInput,
+    entries: PendingEntry[]
+  ): Promise<void> {
+    const startTime = Date.now();
+    this.log.info('granulate.batch', { batchSize: entries.length });
+
+    // 1. Тримминг сообщений и фильтрация
+    const validEntries: PendingEntry[] = [];
+    const filteredEntries: PendingEntry[] = [];
+
+    for (const entry of entries) {
+      const trimmed = this.promptBuilder.truncateMessages(
+        entry.context.messages,
+        this.config.maxMessages
+      );
+      entry.context.messages = trimmed;
+
+      if (
+        !entry.context.mode &&
+        trimmed.length < GranulationEngine.MIN_MESSAGES
+      ) {
+        filteredEntries.push(entry);
+        this.log.debug('batch: пропуск', {
+          sessionId: entry.sessionId,
+          eventType: 'batch',
+          messageCount: trimmed.length,
+          minMessages: GranulationEngine.MIN_MESSAGES,
+        });
+      } else {
+        validEntries.push(entry);
+      }
+    }
+
+    // Резолвим отфильтрованные
+    for (const entry of filteredEntries) {
+      entry.resolve();
+    }
+
+    if (validEntries.length === 0) {
+      this.log.info("Batch: все entries отфильтрованы", { batchSize: 0 });
+      return;
+    }
+
+    // 2. Сохраняем session data для всех valid entries
+    for (const entry of validEntries) {
+      this.storeSessionData(entry.sessionId, {
+        messages: entry.context.messages,
+        participants: entry.context.participants,
+        projectId: entry.context.projectId,
+      });
+
+      toolStoreSessionData(entry.sessionId, {
+        messages: entry.context.messages,
+        participants: entry.context.participants,
+        projectId: entry.context.projectId,
+      });
+    }
+
+    try {
+      // 3. Сборка батч-промпта
+      const systemPrompt = this.promptBuilder.buildSystem();
+      const userPrompt = await this.promptBuilder.buildBatch(validEntries);
+
+      // 4. Один вызов LLM
+      await this.callLLM(input, systemPrompt, userPrompt);
+      const durationMs = Date.now() - startTime;
+      this.log.info('granulate.batch.complete', {
+        batchSize: validEntries.length,
+        durationMs,
+      });
+
+      // 5. Резолвим все valid entries
+      for (const entry of validEntries) {
+        entry.resolve();
+      }
+
+      // 6. enrichLinks для каждого entry
+      if (this.config.enrichLinks) {
+        for (const entry of validEntries) {
+          try {
+            await enrichLinks(entry.context, this.config, this.log, this.mcp);
+          } catch (linkErr) {
+            this.log.debug(
+              `batch enrichLinks ошибка для ${entry.sessionId}: ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`
+            );
+          }
+        }
+      }
+    } catch (err) {
+      const durationMs = Date.now() - startTime;
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.log.error('granulate.batch.error', {
+        batchSize: validEntries.length,
+        durationMs,
+        error: error.message,
+      });
+      for (const entry of validEntries) {
+        entry.reject(error);
+      }
+    }
+  }
+
+  // ── Управление сессиями ──
+
+  isServiceSession(id: string): boolean {
+    return this.serviceSessions.has(id);
+  }
+
+  storeSessionData(sessionId: string, data: SessionData): void {
+    this.sessionDataStore.set(sessionId, data);
+    setTimeout(
+      () => this.sessionDataStore.delete(sessionId),
+      GranulationEngine.STORE_TTL
+    );
+  }
+
+  getSessionData(sessionId: string): SessionData | undefined {
+    return this.sessionDataStore.get(sessionId);
+  }
+
+  // ── Вызов LLM через служебную сессию ──
+
+  private async callLLM(
+    input: PluginInput,
+    systemPrompt: string,
+    userPrompt: string
+  ): Promise<string> {
+    const { client } = input;
+
+    const sessionResult = await this.withTimeout(
+      client.session.create({ body: { title: "akame-granulation" } }),
+      GranulationEngine.LLM_TIMEOUT_MS,
+      "session.create"
+    );
+
+    const sessionId = sessionResult.data?.id;
+    if (!sessionId) {
+      throw new Error("Не удалось создать служебную сессию: client.session.create вернул пустой id");
+    }
+    this.serviceSessions.add(sessionId);
+    _legacyServiceSessions.add(sessionId);
+    this.log.debug('Создана служебная сессия', {
+      sessionId,
+      eventType: 'llm',
+    });
+
+    try {
+      await this.withTimeout(
+        client.session.prompt({
+          path: { id: sessionId },
+          body: {
+            parts: [
+              {
+                type: "text",
+                text: systemPrompt + "\n\n" + userPrompt,
+              },
+            ],
+            agent: "memory-granulator",
+          },
+        }),
+        GranulationEngine.LLM_TIMEOUT_MS,
+        "session.prompt"
+      );
+
+      const messagesResult = await this.withTimeout(
+        client.session.messages({ path: { id: sessionId } }),
+        GranulationEngine.LLM_TIMEOUT_MS,
+        "session.messages"
+      );
+
+      const messages = messagesResult.data ?? [];
+      if (messages.length === 0) {
+        throw new Error(`LLM не вернул ответ (sessionId=${sessionId}, сообщений: 0)`);
+      }
+
+      const lastAssistant = messages
+        .filter((m: { info?: { role?: string } }) => m.info?.role === "assistant")
+        .pop();
+
+      if (!lastAssistant) {
+        throw new Error(`Нет ответа ассистента в сессии ${sessionId}`);
+      }
+
+      const parts = (lastAssistant as { parts?: Array<{ type?: string; text?: string }> }).parts ?? [];
+      const textParts = parts
+        .filter((p) => p.type === "text")
+        .map((p) => p.text ?? "");
+
+      return textParts.join("\n") || "OK (тул вызван)";
+    } finally {
+      try {
+        await client.session.delete({ path: { id: sessionId } });
+      } catch (err) {
+        this.log.debug('session delete не удалась', {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      this.serviceSessions.delete(sessionId);
+      _legacyServiceSessions.delete(sessionId);
+      this.log.debug('Служебная сессия удалена', { sessionId });
+    }
+  }
+
+  // ── Таймаут для асинхронных операций ──
+
+  private withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string
+  ): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) =>
+        setTimeout(() => reject(new Error(`Таймаут ${label}: ${ms}ms`)), ms)
+      ),
+    ]);
+  }
 }
 
-// ── Множество служебных сессий (чтобы не зациклить) ──
-
-const serviceSessions = new Set<string>();
-
-export function isServiceSession(sessionId: string): boolean {
-  return serviceSessions.has(sessionId);
-}
-
-// ── Granulator Engine ──
+// ══════════════════════════════════════════════════════════
+// ── Legacy function wrappers для обратной совместимости ──
+// ══════════════════════════════════════════════════════════
 
 export async function granulate(
   input: PluginInput,
@@ -71,508 +380,24 @@ export async function granulate(
   config: AkameConfig,
   log: Logger
 ): Promise<void> {
-  const startTime = Date.now();
-  log.info(
-    `Грануляция: сессия ${context.sessionId}, сообщений: ${context.messages.length}`
-  );
-
-  try {
-    const messages = truncateMessages(context.messages, config.maxMessages);
-
-    if (messages.length === 0) {
-      log.debug("Нет сообщений для грануляции");
-      return;
-    }
-
-    // Пропускаем слишком короткие диалоги — нечего гранулировать
-    // Для code_diff и tool_result это не актуально (одно сообщение = diff)
-    const MIN_MESSAGES = 3;
-    if (!context.mode && messages.length < MIN_MESSAGES) {
-      log.debug(
-        `Слишком мало сообщений для грануляции: ${messages.length} < ${MIN_MESSAGES}`
-      );
-      return;
-    }
-
-    // Сохраняем данные сессии для тула granulate_output (с projectId)
-    storeSessionData(context.sessionId, {
-      messages,
-      participants: context.participants,
-      projectId: context.projectId,
-    });
-
-    const systemPrompt = getSystemPrompt(log);
-    let userPrompt: string;
-
-    switch (context.mode) {
-      case "code_diff":
-        userPrompt = buildCodeDiffPrompt(context);
-        break;
-      case "tool_result":
-        userPrompt = buildToolResultPrompt(context);
-        break;
-      default:
-        userPrompt = await buildDialoguePrompt(context, config, log);
-    }
-
-    const result = await callLLM(input, systemPrompt, userPrompt, log);
-
-    const duration = Date.now() - startTime;
-    log.info(`Грануляция завершена за ${duration}ms: ${result}`);
-
-    // Пост-обработка: автоматическое cross-namespace связывание
-    if (config.enrichLinks) {
-      try {
-        await enrichLinks(context, config, log);
-      } catch (linkErr) {
-        log.debug(
-          `enrichLinks ошибка: ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`
-        );
-      }
-    }
-  } catch (err) {
-    const duration = Date.now() - startTime;
-    log.error(
-      `Грануляция не удалась за ${duration}ms: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
+  const mcp = new MCPClient(config);
+  const promptBuilder = new PromptBuilder(config, log, mcp);
+  const engine = new GranulationEngine(config, log, mcp, promptBuilder);
+  return engine.granulate(input, context);
 }
 
-// ── Batch Granulation ──
-
-const MIN_MESSAGES = 3;
-
-/**
- * Гранулирует несколько контекстов за один LLM-вызов.
- * Один вызов callLLM(), Тишь вызывает granulate_output для каждого диалога.
- */
 export async function granulateBatch(
   input: PluginInput,
   entries: PendingEntry[],
   config: AkameConfig,
   log: Logger
 ): Promise<void> {
-  const startTime = Date.now();
-  log.info(`Batch грануляция: ${entries.length} записей`);
-
-  // 1. Тримминг сообщений и фильтрация
-  const validEntries: PendingEntry[] = [];
-  const filteredEntries: PendingEntry[] = [];
-
-  for (const entry of entries) {
-    const trimmed = truncateMessages(entry.context.messages, config.maxMessages);
-    entry.context.messages = trimmed;
-
-    if (
-      !entry.context.mode &&
-      trimmed.length < MIN_MESSAGES
-    ) {
-      filteredEntries.push(entry);
-      log.debug(
-        `batch: пропуск ${entry.sessionId} — ${trimmed.length} < ${MIN_MESSAGES} сообщений`
-      );
-    } else {
-      validEntries.push(entry);
-    }
-  }
-
-  // Резолвим отфильтрованные
-  for (const entry of filteredEntries) {
-    entry.resolve();
-  }
-
-  if (validEntries.length === 0) {
-    log.info("Batch: все entries отфильтрованы, нечего гранулировать");
-    return;
-  }
-
-  // 2. Сохраняем session data для всех valid entries
-  for (const entry of validEntries) {
-    storeSessionData(entry.sessionId, {
-      messages: entry.context.messages,
-      participants: entry.context.participants,
-      projectId: entry.context.projectId,
-    });
-  }
-
-  try {
-    // 3. Сборка батч-промпта
-    const systemPrompt = getSystemPrompt(log);
-    const userPrompt = await buildBatchPrompt(validEntries, config, log);
-
-    // 4. Один вызов LLM
-    const result = await callLLM(input, systemPrompt, userPrompt, log);
-    const duration = Date.now() - startTime;
-    log.info(
-      `Batch грануляция завершена за ${duration}ms: ${validEntries.length} диалогов, результат: ${result.slice(0, 100)}`
-    );
-
-    // 5. Резолвим все valid entries
-    for (const entry of validEntries) {
-      entry.resolve();
-    }
-
-    // 6. enrichLinks для каждого entry
-    if (config.enrichLinks) {
-      for (const entry of validEntries) {
-        try {
-          await enrichLinks(entry.context, config, log);
-        } catch (linkErr) {
-          log.debug(
-            `batch enrichLinks ошибка для ${entry.sessionId}: ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`
-          );
-        }
-      }
-    }
-  } catch (err) {
-    const duration = Date.now() - startTime;
-    const error = err instanceof Error ? err : new Error(String(err));
-    log.error(
-      `Batch грануляция не удалась за ${duration}ms: ${error.message}`
-    );
-    for (const entry of validEntries) {
-      entry.reject(error);
-    }
-  }
-}
-
-// ── Билдер батч-промпта ──
-
-function formatEntryMessages(entry: PendingEntry): string {
-  const { messages, mode } = entry.context;
-
-  switch (mode) {
-    case "code_diff":
-      return messages.map((m) => m.content).join("\n\n");
-    case "tool_result":
-    default:
-      return messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n");
-  }
-}
-
-async function buildBatchPrompt(
-  entries: PendingEntry[],
-  config: AkameConfig,
-  log: Logger
-): Promise<string> {
-  let relevantGranules = "";
-
-  // fetchRelevantGranules: собираем ключевые слова из ВСЕХ entries
-  if (config.enrichPrompt) {
-    const allMessages = entries.flatMap((e) => e.context.messages);
-    const virtualContext: GranulateContext = {
-      sessionId: "__batch__",
-      agent: "memory-granulator",
-      projectId: entries[0]?.context.projectId ?? "",
-      messages: allMessages,
-      participants: [...new Set(entries.flatMap((e) => e.context.participants))],
-    };
-    relevantGranules = await fetchRelevantGranules(virtualContext, config, log);
-  }
-
-  const entriesSections = entries
-    .map((entry, i) => {
-      const ctx = entry.context;
-      const mode = ctx.mode || "dialogue";
-      return `---
-## ДИАЛОГ ${i + 1}/${entries.length}
-ID сессии:       ${entry.sessionId}
-Режим:            ${mode}
-Агент:            ${ctx.agent}
-Проект:           ${ctx.projectId}
-Участники:        ${ctx.participants.join(", ")}
-Событие:          ${entry.event}
-Сообщения:
-${formatEntryMessages(entry)}`;
-    })
-    .join("\n\n");
-
-  return `${relevantGranules}Ты — Тишь, специалист по грануляции знаний Argenta Team.
-
-СЕЙЧАС ТЫ ОБРАБАТЫВАЕШЬ ПАКЕТ ИЗ ${entries.length} ДИАЛОГОВ.
-Твоя задача: для КАЖДОГО диалога вызови granulate_output ровно один раз.
-
-ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты, которых нет среди существующих гранул выше. Если факт уже отражён в существующей грануле — не создавай дубликат. Это экономит токены и держит память чистой.
-
-ПРАВИЛА:
-1. Для каждого диалога вызывай granulate_output отдельно.
-2. ПЕРЕДАВАЙ session_id из заголовка диалога в аргумент session_id тула granulate_output.
-3. В summary описывай суть диалога одной строкой (до 200 символов).
-4. НЕ СМЕШИВАЙ гранулы из разных диалогов в одном вызове granulate_output.
-5. Если диалог не содержит значимой информации — всё равно вызови granulate_output с summary="no significant knowledge" и пустым массивом гранул.
-
-${entriesSections}`;
-}
-
-// ── Таймаут для асинхронных операций ──
-
-const LLM_TIMEOUT_MS = 120_000; // 2 минуты на весь LLM-вызов
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Таймаут ${label}: ${ms}ms`)), ms)
-    ),
-  ]);
-}
-
-// ── Вызов LLM через служебную сессию ──
-
-async function callLLM(
-  input: PluginInput,
-  systemPrompt: string,
-  userPrompt: string,
-  log: Logger
-): Promise<string> {
-  const { client } = input;
-
-  // Создаём служебную сессию (с таймаутом)
-  const sessionResult = await withTimeout(
-    client.session.create({ body: { title: "akame-granulation" } }),
-    LLM_TIMEOUT_MS,
-    "session.create"
-  );
-
-  const sessionId = sessionResult.data?.id;
-  if (!sessionId) {
-    throw new Error("Не удалось создать служебную сессию: client.session.create вернул пустой id");
-  }
-  serviceSessions.add(sessionId);
-  log.debug(`Создана служебная сессия: ${sessionId}`);
-
-  try {
-    // Отправляем промпт — LLM вызовет granulate_output тул (с таймаутом)
-    await withTimeout(
-      client.session.prompt({
-        path: { id: sessionId },
-        body: {
-          parts: [
-            {
-              type: "text",
-              text: systemPrompt + "\n\n" + userPrompt,
-            },
-          ],
-          agent: "memory-granulator",
-        },
-      }),
-      LLM_TIMEOUT_MS,
-      "session.prompt"
-    );
-
-    // Получаем сообщения (с таймаутом)
-    const messagesResult = await withTimeout(
-      client.session.messages({ path: { id: sessionId } }),
-      LLM_TIMEOUT_MS,
-      "session.messages"
-    );
-
-    const messages = messagesResult.data ?? [];
-    if (messages.length === 0) {
-      throw new Error(`LLM не вернул ответ (sessionId=${sessionId}, сообщений: 0)`);
-    }
-
-    // Ищем ответ ассистента
-    const lastAssistant = messages
-      .filter((m: { info?: { role?: string } }) => m.info?.role === "assistant")
-      .pop();
-
-    if (!lastAssistant) {
-      throw new Error(`Нет ответа ассистента в сессии ${sessionId}`);
-    }
-
-    // Извлекаем текст из parts
-    const parts = (lastAssistant as { parts?: Array<{ type?: string; text?: string }> }).parts ?? [];
-    const textParts = parts
-      .filter((p) => p.type === "text")
-      .map((p) => p.text ?? "");
-
-    return textParts.join("\n") || "OK (тул вызван)";
-  } finally {
-    try {
-      await client.session.delete({ path: { id: sessionId } });
-    } catch (err) {
-      log.debug(`session delete не удалась: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    serviceSessions.delete(sessionId);
-    log.debug(`Служебная сессия удалена: ${sessionId}`);
-  }
-}
-
-// ── Триминг сообщений ──
-
-function truncateMessages(
-  messages: GranulateContext["messages"],
-  max: number
-): GranulateContext["messages"] {
-  if (messages.length <= max) return messages;
-  return messages.slice(-max);
-}
-
-// ── Билдеры промптов для разных режимов ──
-
-async function buildDialoguePrompt(
-  context: GranulateContext,
-  config: AkameConfig,
-  log: Logger
-): Promise<string> {
-  let relevantGranules = "";
-  if (config.enrichPrompt) {
-    relevantGranules = await fetchRelevantGranules(context, config, log);
-  }
-
-  return `${relevantGranules}ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты, которых нет среди существующих гранул выше. Если факт уже отражён — не создавай дубликат.
-
-Проанализируй диалог и извлеки гранулы знаний.
-
-ID сессии: ${context.sessionId}
-Агент: ${context.agent}
-Проект: ${context.projectId}
-Участники: ${context.participants.join(", ")}
-
-Сообщения диалога:
-${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
-
-При вызове granulate_output передай session_id="${context.sessionId}".
-Используй инструмент granulate_output для сохранения результатов анализа.`;
-}
-
-function buildCodeDiffPrompt(context: GranulateContext): string {
-  return `ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты об изменениях кода. Не создавай гранулы для уже известных сущностей.
-
-Проанализируй изменения в коде (diff) и создай code_knowledge гранулы.
-
-ID сессии: ${context.sessionId}
-Проект: ${context.projectId}
-
-Изменения (diff):
-${context.messages.map((m) => m.content).join("\n\n")}
-
-Создай гранулы с:
-- namespace: "code_knowledge"
-- entity_type: "change" (или "function", "class", "module" — по контексту)
-- module_path: путь к изменённому файлу
-- entity_name: имя изменённой сущности
-- links: связи с существующими гранулами, если известны
-
-Если изменения архитектурно значимые — добавь гранулу в namespace "project_meta".
-
-При вызове granulate_output передай session_id="${context.sessionId}".
-Используй инструмент granulate_output для сохранения результатов.`;
-}
-
-function buildToolResultPrompt(context: GranulateContext): string {
-  return `ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты из результатов git-операций.
-
-Проанализируй результат выполнения инструментов (git) и создай code_knowledge гранулы.
-
-ID сессии: ${context.sessionId}
-Проект: ${context.projectId}
-
-Результаты операций:
-${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
-
-Создай гранулы с:
-- namespace: "code_knowledge"
-- entity_type: "change"
-- links типа "follows" и "references" где применимо
-
-При вызове granulate_output передай session_id="${context.sessionId}".
-Используй инструмент granulate_output для сохранения результатов.`;
-}
-
-// ── fetchRelevantGranules — поиск существующих гранул для обогащения промпта ──
-
-const MAX_GRANULES_PROMPT_SIZE = 2000;
-
-async function fetchRelevantGranules(
-  context: GranulateContext,
-  config: AkameConfig,
-  log: Logger
-): Promise<string> {
   const mcp = new MCPClient(config);
-
-  const keywords = extractKeywords(context.messages);
-  if (keywords.length === 0) return "";
-
-  const namespaces = [
-    "user_facts",
-    "project_meta",
-    "code_knowledge",
-    "dialogue_insights",
-    "infrastructure",
-  ];
-
-  let result = "## Существующие гранулы (используй для links):\n\n";
-  let totalSize = result.length;
-
-  for (const ns of namespaces) {
-    try {
-      const query = keywords.join(" ");
-      const searchResults = await mcp.search(query, config.userId, 3, undefined, ns);
-
-      if (searchResults.length === 0) continue;
-
-      const nsHeader = `### ${ns}:\n`;
-      let nsSection = nsHeader;
-
-      for (const sr of searchResults) {
-        const meta = (sr.metadata as Record<string, unknown>) ?? {};
-        const entityName = meta.entity_name
-          ? `[entity_name: "${meta.entity_name}"] `
-          : "";
-        const content =
-          sr.content.length > 150
-            ? sr.content.slice(0, 147) + "..."
-            : sr.content;
-        nsSection += `- ${entityName}${content}\n`;
-      }
-
-      if (totalSize + nsSection.length > MAX_GRANULES_PROMPT_SIZE) {
-        const remaining = MAX_GRANULES_PROMPT_SIZE - totalSize;
-        if (remaining > nsHeader.length + 20) {
-          nsSection = nsHeader + "- ... (обрезано)\n";
-          result += nsSection;
-        }
-        break;
-      }
-
-      result += nsSection;
-      totalSize += nsSection.length;
-    } catch (err) {
-      log.debug(
-        `fetchRelevantGranules: ошибка для ${ns}: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  return result;
+  const promptBuilder = new PromptBuilder(config, log, mcp);
+  const engine = new GranulationEngine(config, log, mcp, promptBuilder);
+  return engine.granulateBatch(input, entries);
 }
 
-function extractKeywords(
-  messages: GranulateContext["messages"]
-): string[] {
-  const keywords = new Set<string>();
-
-  for (const msg of messages) {
-    const text = msg.content;
-
-    // entity_name: слова с большой буквы (PascalCase / CamelCase)
-    const entityMatches =
-      text.match(/\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b/g) ?? [];
-    for (const m of entityMatches) {
-      if (m.length > 2) keywords.add(m);
-    }
-
-    // Имена файлов: *.ts, *.js, *.py, *.md, *.json, *.yaml, *.sql и т.д.
-    const fileMatches =
-      text.match(
-        /\b[\w\-/]+\.(ts|js|py|md|json|ya?ml|sql|tsx|jsx|css|html)\b/g
-      ) ?? [];
-    for (const m of fileMatches) {
-      keywords.add(m);
-    }
-  }
-
-  return Array.from(keywords).slice(0, 20);
+export function isServiceSession(id: string): boolean {
+  return _legacyServiceSessions.has(id);
 }

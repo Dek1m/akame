@@ -1,36 +1,20 @@
-import { DEFAULTS, type AkameConfig } from "./constants.js";
+// ═══════════════════════════════════════════════════════
+// Обратная совместимость: старый loadConfig + старые типы
+// Новый код: import { AkameConfig } from "./config/schema.js"
+// ═══════════════════════════════════════════════════════
 
+import { AkameConfig } from "./config/schema.js";
+
+export { AkameConfig } from "./config/schema.js";
+export type { TriggerConfig, BatchConfig, CooldownConfig, EnrichConfig, MCPConfig } from "./config/types.js";
+
+/**
+ * Загрузка конфигурации из переменных окружения.
+ *
+ * @deprecated Используй `AkameConfig.load()` из "./config/schema.js"
+ */
 export function loadConfig(
   env: Record<string, string | undefined> = process.env
 ): AkameConfig {
-  return {
-    mcpUrl: env.AKAME_MCP_URL ?? DEFAULTS.MCP_URL,
-    apiKey: env.AKAME_API_KEY,
-    userId: env.AKAME_USER_ID ?? DEFAULTS.USER_ID,
-    granulateIdle: parseBool(env.AKAME_GRANULATE_IDLE, DEFAULTS.GRANULATE_IDLE),
-    granulateFile: parseBool(env.AKAME_GRANULATE_FILE, DEFAULTS.GRANULATE_FILE),
-    granulateTool: parseBool(env.AKAME_GRANULATE_TOOL, DEFAULTS.GRANULATE_TOOL),
-    granulateCompacted: parseBool(env.AKAME_GRANULATE_COMPACTED, DEFAULTS.GRANULATE_COMPACTED),
-    granulateDiff: parseBool(env.AKAME_GRANULATE_DIFF, DEFAULTS.GRANULATE_DIFF),
-    granulateFileWatcher: parseBool(env.AKAME_GRANULATE_FILE_WATCHER, DEFAULTS.GRANULATE_FILE_WATCHER),
-    granulateToolBefore: parseBool(env.AKAME_GRANULATE_TOOL_BEFORE, DEFAULTS.GRANULATE_TOOL_BEFORE),
-    granulateCommand: parseBool(env.AKAME_GRANULATE_COMMAND, DEFAULTS.GRANULATE_COMMAND),
-    cooldownMs: parseInt(env.AKAME_COOLDOWN_MS ?? String(DEFAULTS.COOLDOWN_MS), 10),
-    debounceMs: parseInt(env.AKAME_DEBOUNCE_MS ?? String(DEFAULTS.DEBOUNCE_MS), 10),
-    maxBatch: parseInt(env.AKAME_MAX_BATCH ?? String(DEFAULTS.MAX_BATCH), 10),
-    maxMessages: parseInt(env.AKAME_MAX_MESSAGES ?? String(DEFAULTS.MAX_MESSAGES), 10),
-    enrichLinks: parseBool(env.AKAME_ENRICH_LINKS, DEFAULTS.ENRICH_LINKS),
-    enrichPrompt: parseBool(env.AKAME_ENRICH_PROMPT, DEFAULTS.ENRICH_PROMPT),
-    batchEnabled: parseBool(env.AKAME_BATCH_ENABLED, DEFAULTS.BATCH_ENABLED),
-    batchSize: parseInt(env.AKAME_BATCH_SIZE ?? String(DEFAULTS.BATCH_SIZE), 10),
-    batchMaxAgeMs: parseInt(env.AKAME_BATCH_MAX_AGE_MS ?? String(DEFAULTS.BATCH_MAX_AGE_MS), 10),
-  };
-}
-
-function parseBool(
-  value: string | undefined,
-  fallback: boolean
-): boolean {
-  if (value === undefined) return fallback;
-  return value === "true" || value === "1";
+  return new AkameConfig(env);
 }

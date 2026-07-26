@@ -92,7 +92,7 @@ describe("handleSessionIdle", () => {
       log
     );
 
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining(sid));
+    expect(log.info).toHaveBeenCalledWith("session.idle", expect.objectContaining({ sessionId: sid }));
   });
 
   it("получает сообщения сессии", async () => {
@@ -138,7 +138,8 @@ describe("handleSessionIdle", () => {
     );
 
     expect(log.error).toHaveBeenCalledWith(
-      expect.stringContaining("API down")
+      "session.idle ошибка",
+      expect.objectContaining({ error: "API down" })
     );
   });
 
@@ -156,8 +157,9 @@ describe("handleSessionIdle", () => {
       log
     );
 
-    expect(log.debug).toHaveBeenCalledWith(
-      expect.stringContaining("Нет сообщений")
+    expect(log.info).toHaveBeenCalledWith(
+      "session.idle: нет сообщений",
+      expect.objectContaining({ eventType: "idle" })
     );
   });
 

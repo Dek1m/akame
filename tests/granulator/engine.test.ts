@@ -65,7 +65,8 @@ describe("granulate", () => {
 
     expect(log.info).toHaveBeenCalledOnce();
     expect(log.info).toHaveBeenCalledWith(
-      expect.stringContaining("s1")
+      "granulate",
+      expect.objectContaining({ sessionId: "s1" })
     );
   });
 
@@ -83,8 +84,10 @@ describe("granulate", () => {
 
     await granulate(mockInput, context, makeConfig(), log);
 
-    const logMsg = log.info.mock.calls[0][0];
-    expect(logMsg).toContain("сообщений: 2");
+    expect(log.info).toHaveBeenCalledWith(
+      "granulate",
+      expect.objectContaining({ messageCount: 2 })
+    );
   });
 
   it("обрабатывает пустой массив сообщений", async () => {
@@ -99,7 +102,9 @@ describe("granulate", () => {
     await granulate(mockInput, context, makeConfig(), log);
 
     expect(log.info).toHaveBeenCalledOnce();
-    const logMsg = log.info.mock.calls[0][0];
-    expect(logMsg).toContain("сообщений: 0");
+    expect(log.info).toHaveBeenCalledWith(
+      "granulate",
+      expect.objectContaining({ messageCount: 0 })
+    );
   });
 });
