@@ -138,6 +138,8 @@ export class BatchAccumulator {
     }, this.config.batchMaxAgeMs);
   }
 
+  private FLUSH_TIMEOUT_MS = 300_000; // 5 минут макс на один flush
+
   private async doFlush(count?: number): Promise<void> {
     const take = count ?? this.config.batchSize;
 
@@ -159,9 +161,27 @@ export class BatchAccumulator {
       this.queuedMap.delete(entry.sessionId);
     }
 
+    // Watchdog: сбросить flushing, если flushFn зависла
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    if (this.FLUSH_TIMEOUT_MS > 0) {
+      watchdog = setTimeout(() => {
+        if (this.flushing) {
+          this.flushing = false;
+          const error = new Error(`Watchdog: flush timeout ${this.FLUSH_TIMEOUT_MS}ms`);
+          this.log.error(`batch: watchdog flush timeout — ${batch.length} entries lost`);
+          for (const entry of batch) {
+            entry.reject(error);
+          }
+        }
+      }, this.FLUSH_TIMEOUT_MS);
+    }
+
     try {
       this.log.debug(`batch: flushing ${batch.length} entries`);
       await this.flushFn(batch);
+
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
 
       // Успех — резолвим все, добавляем в recentlyFlushed
       for (const entry of batch) {
@@ -171,6 +191,9 @@ export class BatchAccumulator {
 
       this.log.info(`batch: flushed ${batch.length} entries successfully`);
     } catch (err) {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = null;
+
       const error = err instanceof Error ? err : new Error(String(err));
       this.log.error(`batch: flush failed — ${error.message}`);
 

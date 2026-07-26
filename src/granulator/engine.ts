@@ -304,6 +304,19 @@ ${formatEntryMessages(entry)}`;
 ${entriesSections}`;
 }
 
+// ── Таймаут для асинхронных операций ──
+
+const LLM_TIMEOUT_MS = 120_000; // 2 минуты на весь LLM-вызов
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Таймаут ${label}: ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 // ── Вызов LLM через служебную сессию ──
 
 async function callLLM(
@@ -314,10 +327,12 @@ async function callLLM(
 ): Promise<string> {
   const { client } = input;
 
-  // Создаём служебную сессию
-  const sessionResult = await client.session.create({
-    body: { title: "akame-granulation" },
-  });
+  // Создаём служебную сессию (с таймаутом)
+  const sessionResult = await withTimeout(
+    client.session.create({ body: { title: "akame-granulation" } }),
+    LLM_TIMEOUT_MS,
+    "session.create"
+  );
 
   const sessionId = sessionResult.data?.id;
   if (!sessionId) {
@@ -327,24 +342,30 @@ async function callLLM(
   log.debug(`Создана служебная сессия: ${sessionId}`);
 
   try {
-    // Отправляем промпт — LLM вызовет granulate_output тул
-    await client.session.prompt({
-      path: { id: sessionId },
-      body: {
-        parts: [
-          {
-            type: "text",
-            text: systemPrompt + "\n\n" + userPrompt,
-          },
-        ],
-        agent: "memory-granulator",
-      },
-    });
+    // Отправляем промпт — LLM вызовет granulate_output тул (с таймаутом)
+    await withTimeout(
+      client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          parts: [
+            {
+              type: "text",
+              text: systemPrompt + "\n\n" + userPrompt,
+            },
+          ],
+          agent: "memory-granulator",
+        },
+      }),
+      LLM_TIMEOUT_MS,
+      "session.prompt"
+    );
 
-    // Получаем сообщения
-    const messagesResult = await client.session.messages({
-      path: { id: sessionId },
-    });
+    // Получаем сообщения (с таймаутом)
+    const messagesResult = await withTimeout(
+      client.session.messages({ path: { id: sessionId } }),
+      LLM_TIMEOUT_MS,
+      "session.messages"
+    );
 
     const messages = messagesResult.data ?? [];
     if (messages.length === 0) {

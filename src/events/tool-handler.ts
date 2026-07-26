@@ -50,7 +50,7 @@ export async function handleToolExecuteAfter(
   const command = String(args.command || args.cmd || args._ || "").toLowerCase();
 
   // Для git-тулов проверяем, что команда git-связана
-  const isGitTool = toolName === "git" || toolName === "bash" || toolName === "gh";
+  const isGitTool = isGranulatableTool(toolName) && (toolName === "git" || toolName === "bash" || toolName === "gh" || toolName.endsWith("_git") || toolName.endsWith("_bash") || toolName.endsWith("_gh"));
   if (isGitTool) {
     const isGitCommand =
       command.includes("git ") ||
@@ -69,8 +69,9 @@ export async function handleToolExecuteAfter(
   }
 
   toolCounter++;
-  // Для Gera-тулов логируем запрос
-  if (toolName === "web_search" || toolName === "web_fetch" || toolName === "web_crawl") {
+  // Определяем тип тула по суффиксу (Gera или git)
+  const isGeraTool = isGranulatableTool(toolName) && !isGitTool;
+  if (isGeraTool) {
     const query = String(args.query || args.url || "");
     log.info(
       `tool.execute.after (Gera): ${toolName} #${toolCounter}, запрос: ${query.slice(0, 100)}`
@@ -90,8 +91,8 @@ export async function handleToolExecuteAfter(
       return;
     }
 
-    // Формируем контекст в зависимости от типа тула
-    const isGeraTool = toolName === "web_search" || toolName === "web_fetch" || toolName === "web_crawl";
+    // Формируем контекст в зависимости от типа тула (по суффиксу)
+    const isGeraTool = isGranulatableTool(toolName) && !isGitTool;
     const title = isGeraTool
       ? `## Gera ${toolName}: ${String(args.query || args.url || "").slice(0, 200)}\n## Результат:\n${resultText.slice(0, 3000)}`
       : `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
