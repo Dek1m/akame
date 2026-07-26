@@ -28,6 +28,10 @@ export function storeSessionData(
   setTimeout(() => sessionStore.delete(sessionId), STORE_TTL);
 }
 
+export function getSessionData(sessionId: string): SessionData | undefined {
+  return sessionStore.get(sessionId);
+}
+
 export function createGranulateTool(
   config: AkameConfig,
   log: Logger,
@@ -46,6 +50,10 @@ export function createGranulateTool(
         .string()
         .optional()
         .describe("ID проекта (akame/selti). Если не указан, используется из данных сессии или дефолтный из конфига."),
+      session_id: tool.schema
+        .string()
+        .optional()
+        .describe("ID оригинальной сессии диалога. Обязателен в batch-режиме для связи гранул с исходным диалогом."),
       summary: tool.schema
         .string()
         .describe("Краткое описание диалога одной строкой (до 200 символов)"),
@@ -154,8 +162,8 @@ export function createGranulateTool(
         throw new Error(errMsg);
       }
 
-      const sessionId = context.sessionID;
-      const sessionData = sessionStore.get(sessionId);
+      const lookupId = args.session_id || context.sessionID;
+      const sessionData = sessionStore.get(lookupId);
 
       log.info(
         `granulate_output: ${args.granules.length} гранул, summary: "${args.summary.slice(0, 80)}"`
@@ -169,7 +177,7 @@ export function createGranulateTool(
           namespace: g.namespace,
           importance: g.importance,
           metadata: {
-            session_id: sessionId,
+            session_id: lookupId,
             agent: "memory-granulator",
             project_id: args.project_id ?? sessionData?.projectId ?? config.userId,
             title: g.title,

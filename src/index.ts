@@ -21,6 +21,8 @@ import { createCodeGraphTool } from "./tools/code-graph-tool.js";
 import { createDependencyAnalyzerTool } from "./tools/dependency-analyzer-tool.js";
 import { createMigrateLegacyGranulesTool } from "./tools/migrate-legacy-granules-tool.js";
 import { createGraphHealthTool } from "./tools/graph-health-tool.js";
+import { BatchAccumulator, initAccumulator, resetAccumulator, getAccumulator } from "./granulator/batch-accumulator.js";
+import { granulateBatch } from "./granulator/engine.js";
 
 const akamePlugin: Plugin = async (
   input: PluginInput,
@@ -29,6 +31,17 @@ const akamePlugin: Plugin = async (
   const config = loadConfig();
   const log = createLogger(input.client);
   const mcp = new MCPClient(config);
+
+  // Создаём Batch Accumulator если включён
+  if (config.batchEnabled) {
+    const accumulator = new BatchAccumulator(
+      config,
+      log,
+      async (entries) => await granulateBatch(input, entries, config, log)
+    );
+    initAccumulator(accumulator);
+    log.info(`Batch-грануляция включена: размер=${config.batchSize}, maxAge=${config.batchMaxAgeMs}ms`);
+  }
 
   log.info(`akame загружен (userId: ${config.userId}, dir: ${input.directory})`);
 
@@ -43,6 +56,16 @@ const akamePlugin: Plugin = async (
 
   return {
     dispose: async () => {
+      if (config.batchEnabled) {
+        try {
+          const acc = getAccumulator();
+          await acc.flush();
+          await acc.dispose();
+        } catch (err) {
+          log.debug(`dispose flush: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        resetAccumulator();
+      }
       log.info("akame выгружен");
     },
 

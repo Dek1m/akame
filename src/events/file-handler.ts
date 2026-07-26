@@ -4,6 +4,8 @@ import type { Logger } from "../logger.js";
 import type { AkameConfig } from "../constants.js";
 import { getGitDiff, truncateDiff } from "./git-diff.js";
 import { granulate, type GranulateContext } from "../granulator/engine.js";
+import { getAccumulator } from "../granulator/batch-accumulator.js";
+import type { BatchEntry } from "../granulator/batch-accumulator.js";
 
 // Debounce: filePath -> timeoutId
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -88,7 +90,17 @@ export async function handleFileEdited(
           participants: ["file.edited"],
         };
 
-        await granulate(input, context, config, log);
+        if (config.batchEnabled) {
+          const acc = getAccumulator();
+          const batchEntry: BatchEntry = {
+            sessionId: context.sessionId,
+            event: "file",
+            enqueuedAt: Date.now(),
+          };
+          await acc.enqueue(batchEntry, context);
+        } else {
+          await granulate(input, context, config, log);
+        }
       } catch (err) {
         log.error(
           `file.edited ошибка грануляции: ${err instanceof Error ? err.message : String(err)}`

@@ -21,6 +21,9 @@ export function loadConfig(
     maxMessages: parseInt(env.AKAME_MAX_MESSAGES ?? String(DEFAULTS.MAX_MESSAGES), 10),
     enrichLinks: parseBool(env.AKAME_ENRICH_LINKS, DEFAULTS.ENRICH_LINKS),
     enrichPrompt: parseBool(env.AKAME_ENRICH_PROMPT, DEFAULTS.ENRICH_PROMPT),
+    batchEnabled: parseBool(env.AKAME_BATCH_ENABLED, DEFAULTS.BATCH_ENABLED),
+    batchSize: parseInt(env.AKAME_BATCH_SIZE ?? String(DEFAULTS.BATCH_SIZE), 10),
+    batchMaxAgeMs: parseInt(env.AKAME_BATCH_MAX_AGE_MS ?? String(DEFAULTS.BATCH_MAX_AGE_MS), 10),
   };
 }
 

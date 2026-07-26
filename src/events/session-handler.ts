@@ -7,6 +7,8 @@ import {
   isServiceSession,
   type GranulateContext,
 } from "../granulator/engine.js";
+import { getAccumulator } from "../granulator/batch-accumulator.js";
+import type { BatchEntry } from "../granulator/batch-accumulator.js";
 import type { Message } from "@opencode-ai/sdk";
 
 // Cooldown map: sessionId -> lastGranulationTime
@@ -80,7 +82,7 @@ export async function handleSessionIdle(
 
   // Пропускаем служебные сессии akame (чтобы не зациклить)
   if (isServiceSession(sessionId)) {
-    log.debug(`Пропуск служебной сессии: ${sessionId}`);
+    log.info(`Пропуск служебной сессии: ${sessionId}`);
     return;
   }
 
@@ -108,7 +110,7 @@ export async function handleSessionIdle(
     });
     const messages: MessageInfo[] = messagesResult.data ?? [];
     if (messages.length === 0) {
-      log.debug(`Нет сообщений в сессии ${sessionId}`);
+      log.info(`session.idle: нет сообщений (сессия активна) — ${sessionId}`);
       return;
     }
 
@@ -156,8 +158,18 @@ export async function handleSessionIdle(
       participants
     );
 
-    await granulate(input, context, config, log);
-    granulatedSessions.add(sessionId);
+    if (config.batchEnabled) {
+      const acc = getAccumulator();
+      const batchEntry: BatchEntry = {
+        sessionId,
+        event: "idle",
+        enqueuedAt: Date.now(),
+      };
+      await acc.enqueue(batchEntry, context);
+    } else {
+      await granulate(input, context, config, log);
+      granulatedSessions.add(sessionId);
+    }
   } catch (err) {
     log.error(
       `session.idle ошибка: ${err instanceof Error ? err.message : String(err)}`
@@ -217,7 +229,12 @@ export async function handleSessionCompacted(
       participants
     );
 
-    await granulate(input, context, config, log);
+    if (config.batchEnabled) {
+      const acc = getAccumulator();
+      await acc.enqueue({ sessionId, event: "compacted", enqueuedAt: Date.now() }, context);
+    } else {
+      await granulate(input, context, config, log);
+    }
   } catch (err) {
     log.error(
       `session.compacted ошибка: ${err instanceof Error ? err.message : String(err)}`
@@ -275,7 +292,12 @@ export async function handleSessionDiff(
       participants
     );
 
-    await granulate(input, context, config, log);
+    if (config.batchEnabled) {
+      const acc = getAccumulator();
+      await acc.enqueue({ sessionId, event: "diff", enqueuedAt: Date.now() }, context);
+    } else {
+      await granulate(input, context, config, log);
+    }
   } catch (err) {
     log.error(
       `session.diff ошибка: ${err instanceof Error ? err.message : String(err)}`

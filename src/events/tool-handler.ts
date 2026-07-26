@@ -2,9 +2,23 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import type { Logger } from "../logger.js";
 import type { AkameConfig } from "../constants.js";
 import { granulate, type GranulateContext } from "../granulator/engine.js";
+import { getAccumulator } from "../granulator/batch-accumulator.js";
+import type { BatchEntry } from "../granulator/batch-accumulator.js";
 
-// Git-инструменты для фильтрации
-const GIT_TOOLS = new Set(["git", "bash", "gh"]);
+// Инструменты, результаты которых гранулируются
+// (проверка по суффиксу — чтобы работали MCP-префиксы)
+const GRANULATABLE_TOOL_SUFFIXES = [
+  // Git-тулы
+  "git", "bash", "gh",
+  // Gera — веб-поиск
+  "web_search", "web_fetch", "web_crawl",
+];
+
+function isGranulatableTool(toolName: string): boolean {
+  return GRANULATABLE_TOOL_SUFFIXES.some(
+    (suffix) => toolName === suffix || toolName.endsWith(`_${suffix}`) || toolName.endsWith(`-${suffix}`)
+  );
+}
 
 interface ToolExecuteAfterInput {
   tool: string;
@@ -29,41 +43,58 @@ export async function handleToolExecuteAfter(
 
   const toolName = (toolInput.tool || "").toLowerCase();
 
-  // Фильтруем только git-связанные инструменты
-  if (!GIT_TOOLS.has(toolName)) return;
+  // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
+  if (!isGranulatableTool(toolName)) return;
 
-  // Проверяем, что команда git-связана
   const args = toolInput.args || {};
   const command = String(args.command || args.cmd || args._ || "").toLowerCase();
 
-  const isGitCommand =
-    command.includes("git ") ||
-    command.startsWith("git") ||
-    command.includes("gh ") ||
-    command.includes("push") ||
-    command.includes("commit") ||
-    command.includes("merge") ||
-    command.includes("pr") ||
-    (args._ && Array.isArray(args._) && (args._ as string[]).some(
-      (a: string) =>
-        a === "git" || a === "gh" || a === "push" || a === "commit"
-    ));
+  // Для git-тулов проверяем, что команда git-связана
+  const isGitTool = toolName === "git" || toolName === "bash" || toolName === "gh";
+  if (isGitTool) {
+    const isGitCommand =
+      command.includes("git ") ||
+      command.startsWith("git") ||
+      command.includes("gh ") ||
+      command.includes("push") ||
+      command.includes("commit") ||
+      command.includes("merge") ||
+      command.includes("pr") ||
+      (args._ && Array.isArray(args._) && (args._ as string[]).some(
+        (a: string) =>
+          a === "git" || a === "gh" || a === "push" || a === "commit"
+      ));
 
-  if (!isGitCommand) return;
+    if (!isGitCommand) return;
+  }
 
   toolCounter++;
-  log.info(
-    `tool.execute.after (git): ${toolName} #${toolCounter}, команда: ${command.slice(0, 100)}`
-  );
+  // Для Gera-тулов логируем запрос
+  if (toolName === "web_search" || toolName === "web_fetch" || toolName === "web_crawl") {
+    const query = String(args.query || args.url || "");
+    log.info(
+      `tool.execute.after (Gera): ${toolName} #${toolCounter}, запрос: ${query.slice(0, 100)}`
+    );
+  } else {
+    log.info(
+      `tool.execute.after (git): ${toolName} #${toolCounter}, команда: ${command.slice(0, 100)}`
+    );
+  }
 
-  // Грануляция git-операции
+  // Грануляция результата
   try {
     const resultText = extractResultText(toolOutput);
 
     if (!resultText || resultText.length < 10) {
-      log.debug(`Пустой результат git-команды: ${command}`);
+      log.debug(`Пустой результат тула: ${toolName}`);
       return;
     }
+
+    // Формируем контекст в зависимости от типа тула
+    const isGeraTool = toolName === "web_search" || toolName === "web_fetch" || toolName === "web_crawl";
+    const title = isGeraTool
+      ? `## Gera ${toolName}: ${String(args.query || args.url || "").slice(0, 200)}\n## Результат:\n${resultText.slice(0, 3000)}`
+      : `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`;
 
     const context: GranulateContext = {
       sessionId: toolInput.sessionID || `tool_${Date.now()}`,
@@ -72,15 +103,25 @@ export async function handleToolExecuteAfter(
       mode: "tool_result",
       messages: [
         {
-          id: `git_${Date.now()}`,
+          id: `${toolName}_${Date.now()}`,
           role: "system",
-          content: `## Git операция: ${command}\n## Результат:\n${resultText.slice(0, 2000)}`,
+          content: title,
         },
       ],
-      participants: [toolName, "git"],
+      participants: isGeraTool ? [toolName, "Gera"] : [toolName, "git"],
     };
 
-    await granulate(input, context, config, log);
+    if (config.batchEnabled) {
+      const acc = getAccumulator();
+      const batchEntry: BatchEntry = {
+        sessionId: context.sessionId,
+        event: "tool",
+        enqueuedAt: Date.now(),
+      };
+      await acc.enqueue(batchEntry, context);
+    } else {
+      await granulate(input, context, config, log);
+    }
   } catch (err) {
     log.error(
       `tool.execute.after ошибка грануляции: ${err instanceof Error ? err.message : String(err)}`

@@ -45,6 +45,9 @@ export const DEFAULTS = {
   MAX_MESSAGES: 50,
   ENRICH_LINKS: true,
   ENRICH_PROMPT: true,
+  BATCH_ENABLED: true,
+  BATCH_SIZE: 5,
+  BATCH_MAX_AGE_MS: 60_000,
 } as const;
 
 // ── Типы конфигурации плагина ──
@@ -66,4 +69,7 @@ export interface AkameConfig {
   maxMessages: number;
   enrichLinks: boolean;
   enrichPrompt: boolean;
+  batchEnabled: boolean;
+  batchSize: number;
+  batchMaxAgeMs: number;
 }

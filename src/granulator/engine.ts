@@ -4,6 +4,7 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import type { AkameConfig } from "../constants.js";
 import type { Logger } from "../logger.js";
 import { MCPClient } from "../mcp/client.js";
+import type { PendingEntry } from "./batch-accumulator.js";
 import { storeSessionData } from "./granulate-tool.js";
 import { enrichLinks } from "./link-enricher.js";
 
@@ -137,6 +138,172 @@ export async function granulate(
   }
 }
 
+// ── Batch Granulation ──
+
+const MIN_MESSAGES = 3;
+
+/**
+ * Гранулирует несколько контекстов за один LLM-вызов.
+ * Один вызов callLLM(), Тишь вызывает granulate_output для каждого диалога.
+ */
+export async function granulateBatch(
+  input: PluginInput,
+  entries: PendingEntry[],
+  config: AkameConfig,
+  log: Logger
+): Promise<void> {
+  const startTime = Date.now();
+  log.info(`Batch грануляция: ${entries.length} записей`);
+
+  // 1. Тримминг сообщений и фильтрация
+  const validEntries: PendingEntry[] = [];
+  const filteredEntries: PendingEntry[] = [];
+
+  for (const entry of entries) {
+    const trimmed = truncateMessages(entry.context.messages, config.maxMessages);
+    entry.context.messages = trimmed;
+
+    if (
+      !entry.context.mode &&
+      trimmed.length < MIN_MESSAGES
+    ) {
+      filteredEntries.push(entry);
+      log.debug(
+        `batch: пропуск ${entry.sessionId} — ${trimmed.length} < ${MIN_MESSAGES} сообщений`
+      );
+    } else {
+      validEntries.push(entry);
+    }
+  }
+
+  // Резолвим отфильтрованные
+  for (const entry of filteredEntries) {
+    entry.resolve();
+  }
+
+  if (validEntries.length === 0) {
+    log.info("Batch: все entries отфильтрованы, нечего гранулировать");
+    return;
+  }
+
+  // 2. Сохраняем session data для всех valid entries
+  for (const entry of validEntries) {
+    storeSessionData(entry.sessionId, {
+      messages: entry.context.messages,
+      participants: entry.context.participants,
+      projectId: entry.context.projectId,
+    });
+  }
+
+  try {
+    // 3. Сборка батч-промпта
+    const systemPrompt = getSystemPrompt(log);
+    const userPrompt = await buildBatchPrompt(validEntries, config, log);
+
+    // 4. Один вызов LLM
+    const result = await callLLM(input, systemPrompt, userPrompt, log);
+    const duration = Date.now() - startTime;
+    log.info(
+      `Batch грануляция завершена за ${duration}ms: ${validEntries.length} диалогов, результат: ${result.slice(0, 100)}`
+    );
+
+    // 5. Резолвим все valid entries
+    for (const entry of validEntries) {
+      entry.resolve();
+    }
+
+    // 6. enrichLinks для каждого entry
+    if (config.enrichLinks) {
+      for (const entry of validEntries) {
+        try {
+          await enrichLinks(entry.context, config, log);
+        } catch (linkErr) {
+          log.debug(
+            `batch enrichLinks ошибка для ${entry.sessionId}: ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`
+          );
+        }
+      }
+    }
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    const error = err instanceof Error ? err : new Error(String(err));
+    log.error(
+      `Batch грануляция не удалась за ${duration}ms: ${error.message}`
+    );
+    for (const entry of validEntries) {
+      entry.reject(error);
+    }
+  }
+}
+
+// ── Билдер батч-промпта ──
+
+function formatEntryMessages(entry: PendingEntry): string {
+  const { messages, mode } = entry.context;
+
+  switch (mode) {
+    case "code_diff":
+      return messages.map((m) => m.content).join("\n\n");
+    case "tool_result":
+    default:
+      return messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n");
+  }
+}
+
+async function buildBatchPrompt(
+  entries: PendingEntry[],
+  config: AkameConfig,
+  log: Logger
+): Promise<string> {
+  let relevantGranules = "";
+
+  // fetchRelevantGranules: собираем ключевые слова из ВСЕХ entries
+  if (config.enrichPrompt) {
+    const allMessages = entries.flatMap((e) => e.context.messages);
+    const virtualContext: GranulateContext = {
+      sessionId: "__batch__",
+      agent: "memory-granulator",
+      projectId: entries[0]?.context.projectId ?? "",
+      messages: allMessages,
+      participants: [...new Set(entries.flatMap((e) => e.context.participants))],
+    };
+    relevantGranules = await fetchRelevantGranules(virtualContext, config, log);
+  }
+
+  const entriesSections = entries
+    .map((entry, i) => {
+      const ctx = entry.context;
+      const mode = ctx.mode || "dialogue";
+      return `---
+## ДИАЛОГ ${i + 1}/${entries.length}
+ID сессии:       ${entry.sessionId}
+Режим:            ${mode}
+Агент:            ${ctx.agent}
+Проект:           ${ctx.projectId}
+Участники:        ${ctx.participants.join(", ")}
+Событие:          ${entry.event}
+Сообщения:
+${formatEntryMessages(entry)}`;
+    })
+    .join("\n\n");
+
+  return `${relevantGranules}Ты — Тишь, специалист по грануляции знаний Argenta Team.
+
+СЕЙЧАС ТЫ ОБРАБАТЫВАЕШЬ ПАКЕТ ИЗ ${entries.length} ДИАЛОГОВ.
+Твоя задача: для КАЖДОГО диалога вызови granulate_output ровно один раз.
+
+ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты, которых нет среди существующих гранул выше. Если факт уже отражён в существующей грануле — не создавай дубликат. Это экономит токены и держит память чистой.
+
+ПРАВИЛА:
+1. Для каждого диалога вызывай granulate_output отдельно.
+2. ПЕРЕДАВАЙ session_id из заголовка диалога в аргумент session_id тула granulate_output.
+3. В summary описывай суть диалога одной строкой (до 200 символов).
+4. НЕ СМЕШИВАЙ гранулы из разных диалогов в одном вызове granulate_output.
+5. Если диалог не содержит значимой информации — всё равно вызови granulate_output с summary="no significant knowledge" и пустым массивом гранул.
+
+${entriesSections}`;
+}
+
 // ── Вызов LLM через служебную сессию ──
 
 async function callLLM(
@@ -233,7 +400,9 @@ async function buildDialoguePrompt(
     relevantGranules = await fetchRelevantGranules(context, config, log);
   }
 
-  return `${relevantGranules}Проанализируй диалог и извлеки гранулы знаний.
+  return `${relevantGranules}ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты, которых нет среди существующих гранул выше. Если факт уже отражён — не создавай дубликат.
+
+Проанализируй диалог и извлеки гранулы знаний.
 
 ID сессии: ${context.sessionId}
 Агент: ${context.agent}
@@ -243,11 +412,14 @@ ID сессии: ${context.sessionId}
 Сообщения диалога:
 ${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
 
+При вызове granulate_output передай session_id="${context.sessionId}".
 Используй инструмент granulate_output для сохранения результатов анализа.`;
 }
 
 function buildCodeDiffPrompt(context: GranulateContext): string {
-  return `Проанализируй изменения в коде (diff) и создай code_knowledge гранулы.
+  return `ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты об изменениях кода. Не создавай гранулы для уже известных сущностей.
+
+Проанализируй изменения в коде (diff) и создай code_knowledge гранулы.
 
 ID сессии: ${context.sessionId}
 Проект: ${context.projectId}
@@ -264,11 +436,14 @@ ${context.messages.map((m) => m.content).join("\n\n")}
 
 Если изменения архитектурно значимые — добавь гранулу в namespace "project_meta".
 
+При вызове granulate_output передай session_id="${context.sessionId}".
 Используй инструмент granulate_output для сохранения результатов.`;
 }
 
 function buildToolResultPrompt(context: GranulateContext): string {
-  return `Проанализируй результат выполнения инструментов (git) и создай code_knowledge гранулы.
+  return `ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты из результатов git-операций.
+
+Проанализируй результат выполнения инструментов (git) и создай code_knowledge гранулы.
 
 ID сессии: ${context.sessionId}
 Проект: ${context.projectId}
@@ -281,6 +456,7 @@ ${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
 - entity_type: "change"
 - links типа "follows" и "references" где применимо
 
+При вызове granulate_output передай session_id="${context.sessionId}".
 Используй инструмент granulate_output для сохранения результатов.`;
 }
 
