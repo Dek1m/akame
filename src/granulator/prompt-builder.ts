@@ -53,7 +53,7 @@ export class PromptBuilder {
 Правила:
 1. Извлекай только существенную информацию
 2. Каждая гранула должна быть самодостаточна
-3. Разделяй гранулы по namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure
+3. Используй существующие namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure. Если нужен новый — создавай любой другой, сервер зарегистрирует автоматически
 4. Оценивай importance от 1 до 5
 5. Используй инструмент granulate_output для сохранения результатов`;
   }
@@ -70,7 +70,7 @@ export class PromptBuilder {
 
 Проанализируй диалог и извлеки гранулы знаний.
 
-Извлекай гранулы по namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure
+Извлекай гранулы по namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure. Если тема не входит ни в один из них — создай новый namespace с осмысленным именем.
 
 ID сессии: ${context.sessionId}
 Агент: ${context.agent}
