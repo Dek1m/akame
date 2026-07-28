@@ -358,17 +358,9 @@ function validateGranule(
     throw new Error(`Гранула [${index}]: content должен быть непустой строкой`);
   }
 
-  const validNamespaces = [
-    "user_facts",
-    "project_meta",
-    "dialogue_insights",
-    "code_knowledge",
-    "infrastructure",
-  ];
-  if (!validNamespaces.includes(raw.namespace as string)) {
-    throw new Error(
-      `Гранула [${index}]: namespace должен быть одним из: ${validNamespaces.join(", ")}`
-    );
+  // Namespace валидируется сервером через реестр — не хардкодим список
+  if (typeof raw.namespace !== "string" || raw.namespace.length === 0) {
+    throw new Error(`Гранула [${index}]: namespace должен быть непустой строкой`);
   }
 
   const importance = Number(raw.importance);
