@@ -84,16 +84,20 @@ describe("MCPClient", () => {
   });
 
   it("выбрасывает ошибку при HTTP 4xx", async () => {
-    mockFetch.mockResolvedValueOnce(makeResponse({ error: "bad request" }, 400));
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(makeResponse({ error: "bad request" }, 400))
+    );
 
     await expect(client.get("bad-id")).rejects.toThrow("MCP HTTP 400");
   });
 
   it("выбрасывает ошибку при MCP error", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeSSEResponse({
-        error: { code: -32000, message: "not found" },
-      })
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeSSEResponse({
+          error: { code: -32000, message: "not found" },
+        })
+      )
     );
 
     await expect(client.get("id")).rejects.toThrow("MCP error: not found");
@@ -149,10 +153,13 @@ describe("MCPClient", () => {
   });
 
   it("handleSessionIdle обрабатывает прямой JSON-RPC error", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeResponse({
-        error: { code: -32600, message: "invalid request" },
-      })
+    // Фабрика для создания нового Response при каждом вызове
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeResponse({
+          error: { code: -32600, message: "invalid request" },
+        })
+      )
     );
 
     await expect(client.get("id")).rejects.toThrow("MCP error: invalid request");

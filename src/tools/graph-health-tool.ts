@@ -208,8 +208,36 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
             }
           }
         } catch (err) {
-          // Игнорируем ошибки для отдельных гранул
-          log.debug(`graph_health: ошибка get_relations для ${g.id} — ${err instanceof Error ? err.message : String(err)}`);
+          // Fallback на локальные данные при ошибке серверного вызова
+          log.debug(`graph_health: fallback на локальные данные для ${g.id} — ${err instanceof Error ? err.message : String(err)}`);
+          const links = extractLinks(g.metadata as Record<string, unknown>);
+          totalLinks += links.length;
+
+          for (const link of links) {
+            let targetNs: string | null = null;
+            if (isUuid(link.target)) {
+              const targetGranule = idToGranule.get(link.target);
+              if (targetGranule) {
+                targetNs = targetGranule.namespace;
+                hasIncoming.add(link.target);
+              }
+            } else {
+              targetNs = nameToNs.get(link.target) ?? null;
+              if (targetNs) {
+                for (const tg of (allGranules.filter(ng => ng.namespace === targetNs))) {
+                  const tmeta = tg.metadata as Record<string, unknown>;
+                  if (String(tmeta?.entity_name ?? "") === link.target) {
+                    hasIncoming.add(tg.id);
+                  }
+                }
+              }
+            }
+
+            if (targetNs && targetNs !== g.namespace) {
+              const key = `${g.namespace}→${targetNs}`;
+              crossNsMap.set(key, (crossNsMap.get(key) ?? 0) + 1);
+            }
+          }
         }
       }
 

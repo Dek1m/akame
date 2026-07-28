@@ -8,6 +8,7 @@ const mockMcp = {
   recent: vi.fn(),
   findSimilar: vi.fn(),
   store: vi.fn(),
+  callTool: vi.fn().mockRejectedValue(new Error("callTool not mocked")),
 };
 
 import { createGraphHealthTool } from "../../src/tools/graph-health-tool.js";
