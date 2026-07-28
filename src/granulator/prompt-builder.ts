@@ -8,19 +8,22 @@ import type { GranulateContext } from "./engine.js";
 import type { PendingEntry } from "./batch-accumulator.js";
 import { MCPClient } from "../mcp/client.js";
 import { extractKeywords } from "./keyword-extractor.js";
+import type { NamespaceRegistry } from "../namespace-registry.js";
 
 export class PromptBuilder {
   private config: AkameConfig;
   private log: Logger;
   private mcp: MCPClient;
+  private registry: NamespaceRegistry;
   private cachedPrompt: string | null = null;
   private cachedMtime: number = 0;
   private static readonly MAX_GRANULES_PROMPT_SIZE = 2000;
 
-  constructor(config: AkameConfig, log: Logger, mcp: MCPClient) {
+  constructor(config: AkameConfig, log: Logger, mcp: MCPClient, registry: NamespaceRegistry) {
     this.config = config;
     this.log = log;
     this.mcp = mcp;
+    this.registry = registry;
   }
 
   // ── Системный промпт (с кешированием по mtime) ──
@@ -53,7 +56,7 @@ export class PromptBuilder {
 Правила:
 1. Извлекай только существенную информацию
 2. Каждая гранула должна быть самодостаточна
-3. Используй существующие namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure. Если нужен новый — создавай любой другой, сервер зарегистрирует автоматически
+3. Используй существующие namespace из реестра. Если нужен новый — создавай любой, сервер зарегистрирует автоматически
 4. Оценивай importance от 1 до 5
 5. Используй инструмент granulate_output для сохранения результатов`;
   }
@@ -66,11 +69,14 @@ export class PromptBuilder {
       relevantGranules = await this.fetchRelevant(context);
     }
 
+    const namespaceList = await this.registry.getUids();
+    const nsText = namespaceList.join(", ");
+
     return `${relevantGranules}ИНКРЕМЕНТАЛЬНАЯ ГРАНУЛЯЦИЯ: извлекай только НОВЫЕ факты, которых нет среди существующих гранул выше. Если факт уже отражён — не создавай дубликат.
 
 Проанализируй диалог и извлеки гранулы знаний.
 
-Извлекай гранулы по namespace: user_facts, project_meta, dialogue_insights, code_knowledge, infrastructure. Если тема не входит ни в один из них — создай новый namespace с осмысленным именем.
+Извлекай гранулы по namespace: ${nsText}. Если тема не входит ни в один из них — создай новый namespace с осмысленным именем.
 
 ID сессии: ${context.sessionId}
 Агент: ${context.agent}
@@ -185,13 +191,7 @@ ${entriesSections}`;
     const keywords = extractKeywords(context.messages);
     if (keywords.length === 0) return "";
 
-    const namespaces = [
-      "user_facts",
-      "project_meta",
-      "code_knowledge",
-      "dialogue_insights",
-      "infrastructure",
-    ];
+    const namespaces = await this.registry.getUids();
 
     let result = "## Существующие гранулы (используй для links):\n\n";
     let totalSize = result.length;

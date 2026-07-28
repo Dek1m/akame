@@ -1,10 +1,12 @@
 // ── Namespace-ы athena-memory ──
+// Дефолтные namespace для fallback. Динамический список загружается из реестра.
 export const NAMESPACE_USER_FACTS = "user_facts" as const;
 export const NAMESPACE_PROJECT_META = "project_meta" as const;
 export const NAMESPACE_DIALOGUE_INSIGHTS = "dialogue_insights" as const;
 export const NAMESPACE_CODE_KNOWLEDGE = "code_knowledge" as const;
 export const NAMESPACE_INFRASTRUCTURE = "infrastructure" as const;
 
+/** @deprecated Используй NamespaceRegistry.getUids() для динамического списка */
 export const NAMESPACES = [
   NAMESPACE_USER_FACTS,
   NAMESPACE_PROJECT_META,
@@ -13,7 +15,8 @@ export const NAMESPACES = [
   NAMESPACE_INFRASTRUCTURE,
 ] as const;
 
-export type Namespace = (typeof NAMESPACES)[number];
+/** Namespace — строковый тип, любое значение из реестра */
+export type Namespace = string;
 
 // ── Исключённые директории ──
 export const EXCLUDE_DIRS = new Set([

@@ -187,14 +187,7 @@ export const GRANULATOR_JSON_SCHEMA = {
           },
           namespace: {
             type: "string",
-            enum: [
-              "user_facts",
-              "project_meta",
-              "dialogue_insights",
-              "code_knowledge",
-              "infrastructure",
-            ],
-            description: "Категория гранулы",
+            description: "Категория гранулы (любой namespace из реестра athena-memory)",
           },
           importance: {
             type: "integer",

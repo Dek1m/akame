@@ -8,6 +8,12 @@ import { withRetry, type RetryConfig } from "./retry.js";
 
 // ── Типы ──
 
+export interface NamespaceRecord {
+  uid: string;
+  name: string;
+  description: string;
+}
+
 export interface GranuleEntry {
   content: string;
   metadata?: Record<string, unknown>;
@@ -197,6 +203,10 @@ export class MCPClient {
       threshold,
       namespace,
     }, true) as Promise<SearchResult[]>;
+  }
+
+  async namespaces(): Promise<NamespaceRecord[]> {
+    return this.call("memory_namespaces", {}, true) as Promise<NamespaceRecord[]>;
   }
 
   // ── Внутренние методы ──

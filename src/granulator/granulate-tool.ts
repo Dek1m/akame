@@ -66,13 +66,9 @@ export function createGranulateTool(
               .describe(
                 "Самодостаточное описание факта. Не используй отсылки к другим гранулам."
               ),
-            namespace: tool.schema.enum([
-              "user_facts",
-              "project_meta",
-              "dialogue_insights",
-              "code_knowledge",
-              "infrastructure",
-            ] as const),
+            namespace: tool.schema
+              .string()
+              .describe("Namespace гранулы (любой из реестра athena-memory)"),
             importance: tool.schema
               .number()
               .int()

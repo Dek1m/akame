@@ -9,6 +9,7 @@ import type { Event } from "@opencode-ai/sdk";
 import type { AkameConfig } from "../config/schema.js";
 import type { Logger } from "../logger.js";
 import { MCPClient } from "../mcp/client.js";
+import { NamespaceRegistry } from "../namespace-registry.js";
 import { PromptBuilder } from "../granulator/prompt-builder.js";
 import { GranulationEngine } from "../granulator/engine.js";
 import { SessionHandler } from "../events/session-handler.js";
@@ -22,6 +23,7 @@ export class PluginManager {
   readonly log: Logger;
   readonly mcp: MCPClient;
   readonly input: PluginInput;
+  readonly registry: NamespaceRegistry;
   readonly promptBuilder: PromptBuilder;
   readonly granulationEngine: GranulationEngine;
   readonly batchProcessor: BatchAccumulator | null;
@@ -43,7 +45,8 @@ export class PluginManager {
 
     this.log.debug("PluginManager constructor: config.batch.enabled=" + config.batch.enabled);
 
-    this.promptBuilder = new PromptBuilder(config, log, mcp);
+    this.registry = new NamespaceRegistry(mcp);
+    this.promptBuilder = new PromptBuilder(config, log, mcp, this.registry);
     this.log.debug("PromptBuilder created");
 
     this.granulationEngine = new GranulationEngine(config, log, mcp, this.promptBuilder);

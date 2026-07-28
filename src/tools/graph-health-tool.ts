@@ -7,7 +7,7 @@ import { tool } from "@opencode-ai/plugin";
 import { MCPClient } from "../mcp/client.js";
 import type { MemoryRecord } from "../mcp/client.js";
 import type { AkameConfig } from "../constants.js";
-import { NAMESPACES } from "../constants.js";
+import type { NamespaceRegistry } from "../namespace-registry.js";
 import type { Logger } from "../logger.js";
 import type { CodeLink } from "../granulator/schema.js";
 
@@ -64,11 +64,13 @@ interface RelationsResult {
 
 async function collectAllGranules(
   mcp: MCPClient,
-  log: Logger
+  log: Logger,
+  registry: NamespaceRegistry
 ): Promise<MemoryRecord[]> {
   const all: MemoryRecord[] = [];
+  const namespaces = await registry.getUids();
 
-  for (const ns of NAMESPACES) {
+  for (const ns of namespaces) {
     try {
       const page1 = await mcp.list(undefined, ns, 1, 0);
       log.debug(`graph_health: ${ns} содержит ${page1.total} записей`);
@@ -112,7 +114,7 @@ function isUuid(s: string): boolean {
 
 // ── Фабрика тула ──
 
-export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCPClient) {
+export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCPClient, registry: NamespaceRegistry) {
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Проверить здоровье графа знаний. " +
@@ -139,6 +141,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         throw new Error(errMsg);
       }
 
+      const namespaces = await registry.getUids();
       const { project, verbose } = args;
       log.info(`graph_health: анализ для ${project}`);
 
@@ -154,7 +157,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       }
 
       // ── 2. Собираем все гранулы (fallback если нет серверной статистики) ──
-      const allGranules = await collectAllGranules(mcp, log);
+      const allGranules = await collectAllGranules(mcp, log, registry);
 
       if (allGranules.length === 0) {
         return `graph_health: граф пуст — гранул не найдено`;
@@ -277,7 +280,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       const nsStats: Record<string, NamespaceStats> = {};
       const nsGranules: Record<string, MemoryRecord[]> = {};
 
-      for (const ns of NAMESPACES) {
+      for (const ns of namespaces) {
         nsGranules[ns] = [];
       }
 
@@ -287,7 +290,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         }
       }
 
-      for (const ns of NAMESPACES) {
+      for (const ns of namespaces) {
         const granules = nsGranules[ns] ?? [];
         let linked = 0;
         let orphan = 0;
@@ -328,7 +331,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       // ── 7. Критичные сироты (importance ≥ 3 без связей) ──
       const criticalOrphans: CriticalOrphan[] = [];
 
-      for (const ns of NAMESPACES) {
+      for (const ns of namespaces) {
         for (const g of nsGranules[ns] ?? []) {
           const meta = g.metadata as Record<string, unknown>;
           const importance = Number(meta?.importance ?? 3);
@@ -355,7 +358,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
 
       // ── 9. Дубликаты (одинаковый entity_name в одном namespace) ──
       const entityCounts = new Map<string, { ns: string; count: number }>();
-      for (const ns of NAMESPACES) {
+      for (const ns of namespaces) {
         for (const g of nsGranules[ns] ?? []) {
           const meta = g.metadata as Record<string, unknown>;
           const ename = String(meta?.entity_name ?? "");
@@ -389,7 +392,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         `  По namespace:`,
       ];
 
-      for (const ns of NAMESPACES) {
+      for (const ns of namespaces) {
         const s = nsStats[ns];
         if (!s) continue;
         lines.push(

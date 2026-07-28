@@ -35,13 +35,13 @@ describe("validateGranules", () => {
     expect(result.granules).toHaveLength(0);
   });
 
-  it("выбрасывает ошибку при невалидном namespace", () => {
+  it("принимает любой namespace (валидация на стороне сервера)", () => {
     const input = {
       summary: "test",
       granules: [
         {
           content: "test",
-          namespace: "wrong_namespace",
+          namespace: "any_namespace",
           importance: 3,
           metadata: {
             session_id: "s",
@@ -55,7 +55,8 @@ describe("validateGranules", () => {
       ],
     };
 
-    expect(() => validateGranules(input)).toThrow("namespace");
+    const result = validateGranules(input);
+    expect(result.granules[0].namespace).toBe("any_namespace");
   });
 
   it("выбрасывает ошибку при importance вне диапазона", () => {
