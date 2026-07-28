@@ -4,3 +4,10 @@ dist/
 *.log
 .DS_Store
 coverage/
+
+# Лишние файлы (не относятся к проекту)
+*.rsc
+*.db
+*.db-shm
+*.db-wal
+vpn-server/

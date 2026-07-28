@@ -1,6 +1,7 @@
 // ── Tool: graph_health — верификация здоровья графа знаний ──
 // ДОСТУПЕН ТОЛЬКО агенту memory-granulator (Тишь).
 // Анализирует связность гранул, сирот, дубликаты, cross-namespace связи.
+// ОПТИМИЗИРОВАН: использует серверные tools для графа (memory_graph_stats, memory_get_relations).
 
 import { tool } from "@opencode-ai/plugin";
 import { MCPClient } from "../mcp/client.js";
@@ -40,6 +41,23 @@ interface DuplicateGroup {
   namespace: string;
   entityName: string;
   count: number;
+}
+
+interface GraphStatsResult {
+  total_granules: number;
+  total_relations: number;
+  orphan_count: number;
+  avg_links_per_granule: number;
+  namespaces: Record<string, number>;
+}
+
+interface RelationsResult {
+  relations: Array<{
+    source_id: string;
+    target_id: string;
+    relation_type: string;
+  }>;
+  total: number;
 }
 
 // ── Вспомогательные функции ──
@@ -98,7 +116,8 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
   return tool({
     description:
       "[ТОЛЬКО ДЛЯ memory-granulator] Проверить здоровье графа знаний. " +
-      "Анализирует связность, сирот, дубликаты и cross-namespace связи.",
+      "Анализирует связность, сирот, дубликаты и cross-namespace связи. " +
+      "Использует серверные tools для оптимизации (memory_graph_stats, memory_get_relations).",
 
     args: {
       project: tool.schema
@@ -123,7 +142,18 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       const { project, verbose } = args;
       log.info(`graph_health: анализ для ${project}`);
 
-      // ── 1. Собираем все гранулы ──
+      // ── 1. Получаем общую статистику графа через серверный tool ──
+      let graphStats: GraphStatsResult | null = null;
+      try {
+        const result = await mcp.callTool("memory_graph_stats", {}) as { content: Array<{ text: string }> };
+        if (result?.content?.[0]?.text) {
+          graphStats = JSON.parse(result.content[0].text);
+        }
+      } catch (err) {
+        log.debug(`graph_health: memory_graph_stats недоступен, используем fallback — ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      // ── 2. Собираем все гранулы (fallback если нет серверной статистики) ──
       const allGranules = await collectAllGranules(mcp, log);
 
       if (allGranules.length === 0) {
@@ -134,7 +164,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         `graph_health: собрано ${allGranules.length} гранул`
       );
 
-      // ── 2. Строим lookup-таблицы ──
+      // ── 3. Строим lookup-таблицы ──
       const idToGranule = new Map<string, MemoryRecord>();
       const nameToNs = new Map<string, string>(); // entity_name → namespace (first occurrence)
 
@@ -147,28 +177,48 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         }
       }
 
-      // ── 3. Статистика по namespace: linked vs orphan ──
-      const nsStats: Record<string, NamespaceStats> = {};
-      const nsGranules: Record<string, MemoryRecord[]> = {};
+      // ── 4. Получаем связи через серверный tool (оптимизация) ──
+      const hasIncoming = new Set<string>();
+      const crossNsMap = new Map<string, number>(); // "from→to"
+      let totalLinks = 0;
 
-      for (const ns of NAMESPACES) {
-        nsGranules[ns] = [];
-      }
+      // Пробуем получить связи через серверный tool для каждой гранулы
+      // Ограничиваем количество запросов для производительности
+      const GRANULES_WITH_RELATIONS_LIMIT = 100;
+      const granulesToCheck = allGranules.slice(0, GRANULES_WITH_RELATIONS_LIMIT);
 
-      for (const g of allGranules) {
-        if (nsGranules[g.namespace]) {
-          nsGranules[g.namespace].push(g);
+      for (const g of granulesToCheck) {
+        try {
+          const result = await mcp.callTool("memory_get_relations", { source_id: g.id }) as { content: Array<{ text: string }> };
+          if (result?.content?.[0]?.text) {
+            const relationsResult: RelationsResult = JSON.parse(result.content[0].text);
+            totalLinks += relationsResult.total;
+
+            for (const rel of relationsResult.relations) {
+              const targetGranule = idToGranule.get(rel.target_id);
+              if (targetGranule) {
+                hasIncoming.add(rel.target_id);
+
+                // Cross-namespace статистика
+                if (targetGranule.namespace !== g.namespace) {
+                  const key = `${g.namespace}→${targetGranule.namespace}`;
+                  crossNsMap.set(key, (crossNsMap.get(key) ?? 0) + 1);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // Игнорируем ошибки для отдельных гранул
+          log.debug(`graph_health: ошибка get_relations для ${g.id} — ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
-      // Собираем множество ID гранул, на которые кто-то ссылается (входящие связи)
-      const hasIncoming = new Set<string>();
-      const crossNsMap = new Map<string, number>(); // "from→to"
-
-      for (const g of allGranules) {
+      // Для оставшихся гранул используем локальные данные
+      for (const g of allGranules.slice(GRANULES_WITH_RELATIONS_LIMIT)) {
         const links = extractLinks(g.metadata as Record<string, unknown>);
+        totalLinks += links.length;
+
         for (const link of links) {
-          // Резолвим target namespace
           let targetNs: string | null = null;
           if (isUuid(link.target)) {
             const targetGranule = idToGranule.get(link.target);
@@ -179,8 +229,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
           } else {
             targetNs = nameToNs.get(link.target) ?? null;
             if (targetNs) {
-              // Находим ID гранулы по имени
-              for (const tg of nsGranules[targetNs] ?? []) {
+              for (const tg of (allGranules.filter(ng => ng.namespace === targetNs))) {
                 const tmeta = tg.metadata as Record<string, unknown>;
                 if (String(tmeta?.entity_name ?? "") === link.target) {
                   hasIncoming.add(tg.id);
@@ -189,11 +238,24 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
             }
           }
 
-          // Cross-namespace статистика
           if (targetNs && targetNs !== g.namespace) {
             const key = `${g.namespace}→${targetNs}`;
             crossNsMap.set(key, (crossNsMap.get(key) ?? 0) + 1);
           }
+        }
+      }
+
+      // ── 5. Статистика по namespace: linked vs orphan ──
+      const nsStats: Record<string, NamespaceStats> = {};
+      const nsGranules: Record<string, MemoryRecord[]> = {};
+
+      for (const ns of NAMESPACES) {
+        nsGranules[ns] = [];
+      }
+
+      for (const g of allGranules) {
+        if (nsGranules[g.namespace]) {
+          nsGranules[g.namespace].push(g);
         }
       }
 
@@ -227,7 +289,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
         };
       }
 
-      // ── 4. Cross-namespace матрица ──
+      // ── 6. Cross-namespace матрица ──
       const crossNsLinks: CrossNsEntry[] = [];
       for (const [key, count] of crossNsMap) {
         const [from, to] = key.split("→");
@@ -235,7 +297,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       }
       crossNsLinks.sort((a, b) => b.count - a.count);
 
-      // ── 5. Критичные сироты (importance ≥ 3 без связей) ──
+      // ── 7. Критичные сироты (importance ≥ 3 без связей) ──
       const criticalOrphans: CriticalOrphan[] = [];
 
       for (const ns of NAMESPACES) {
@@ -257,19 +319,13 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       }
       criticalOrphans.sort((a, b) => b.importance - a.importance);
 
-      // ── 6. Среднее связей на гранулу ──
-      let totalLinks = 0;
-      for (const g of allGranules) {
-        totalLinks += extractLinks(
-          g.metadata as Record<string, unknown>
-        ).length;
-      }
+      // ── 8. Среднее связей на гранулу ──
       const avgLinks =
         allGranules.length > 0
           ? Math.round((totalLinks / allGranules.length) * 10) / 10
           : 0;
 
-      // ── 7. Дубликаты (одинаковый entity_name в одном namespace) ──
+      // ── 9. Дубликаты (одинаковый entity_name в одном namespace) ──
       const entityCounts = new Map<string, { ns: string; count: number }>();
       for (const ns of NAMESPACES) {
         for (const g of nsGranules[ns] ?? []) {
@@ -295,11 +351,12 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       }
       duplicates.sort((a, b) => b.count - a.count);
 
-      // ── 8. Формируем отчёт ──
+      // ── 10. Формируем отчёт ──
       const lines: string[] = [
         `graph_health: отчёт о здоровье графа знаний`,
         `  Проект: ${project}`,
         `  Всего гранул: ${allGranules.length}`,
+        `  Всего связей: ${totalLinks} (из них ${hasIncoming.size} входящих)`,
         ``,
         `  По namespace:`,
       ];

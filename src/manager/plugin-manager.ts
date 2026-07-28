@@ -41,13 +41,13 @@ export class PluginManager {
     this.log = log;
     this.mcp = mcp;
 
-    console.log("[akame-diag] PluginManager constructor: config.batch.enabled=" + config.batch.enabled);
+    this.log.debug("PluginManager constructor: config.batch.enabled=" + config.batch.enabled);
 
     this.promptBuilder = new PromptBuilder(config, log, mcp);
-    console.log("[akame-diag] PromptBuilder created");
+    this.log.debug("PromptBuilder created");
 
     this.granulationEngine = new GranulationEngine(config, log, mcp, this.promptBuilder);
-    console.log("[akame-diag] GranulationEngine created");
+    this.log.debug("GranulationEngine created");
 
     // Создаём BatchAccumulator только если batch включён (Фаза 4)
     this.batchProcessor = config.batch.enabled
@@ -64,19 +64,19 @@ export class PluginManager {
   }
 
   start(): Hooks {
-    console.log("[akame-diag] PluginManager.start() called, batch.enabled=" + this.config.batch.enabled);
+    this.log.debug("PluginManager.start() called, batch.enabled=" + this.config.batch.enabled);
 
     if (this.batchProcessor) {
-      console.log("[akame-diag] BatchProcessor created, size=" + this.config.batch.size + ", maxAgeMs=" + this.config.batch.maxAgeMs);
+      this.log.debug("BatchProcessor created, size=" + this.config.batch.size + ", maxAgeMs=" + this.config.batch.maxAgeMs);
       this.log.info("Batch-грануляция включена", {
         batchSize: this.config.batch.size,
         batchMaxAgeMs: this.config.batch.maxAgeMs,
       });
     } else {
-      console.log("[akame-diag] BatchProcessor NOT created");
+      this.log.debug("BatchProcessor NOT created");
     }
 
-    console.log("[akame-diag] Registering tools...");
+    this.log.debug("Registering tools...");
     this.log.info("akame загружен", {
       userId: this.config.mcp.userId,
       directory: this.input.directory,
@@ -84,7 +84,7 @@ export class PluginManager {
 
     // ── Регистрация тулов ──
     const tools = registerTools(this.config, this.log, this.mcp, this.input.directory);
-    console.log("[akame-diag] Tools registered: " + Object.keys(tools).join(", "));
+    this.log.debug("Tools registered: " + Object.keys(tools).join(", "));
 
     const manager = this;
 

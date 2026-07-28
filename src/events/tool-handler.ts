@@ -61,19 +61,19 @@ export class ToolHandler extends BaseEventHandler {
     toolInput: ToolExecuteAfterInput,
     toolOutput: ToolExecuteAfterOutput
   ): Promise<void> {
-    console.log("[akame-diag] handleAfter called, tool=" + toolInput.tool + ", sessionID=" + toolInput.sessionID);
+    this.log.debug("handleAfter called, tool=" + toolInput.tool + ", sessionID=" + toolInput.sessionID);
 
     if (!this.config.granulateTool) {
-      console.log("[akame-diag] handleAfter: granulateTool=false, skipping");
+      this.log.debug("handleAfter: granulateTool=false, skipping");
       return;
     }
 
     const toolName = (toolInput.tool || "").toLowerCase();
-    console.log("[akame-diag] handleAfter: toolName=" + toolName + ", isGranulatable=" + isGranulatableTool(toolName));
+    this.log.debug("handleAfter: toolName=" + toolName + ", isGranulatable=" + isGranulatableTool(toolName));
 
     // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
     if (!isGranulatableTool(toolName)) {
-      console.log("[akame-diag] handleAfter: not granulatable, skipping");
+      this.log.debug("handleAfter: not granulatable, skipping");
       return;
     }
 
@@ -162,13 +162,13 @@ export class ToolHandler extends BaseEventHandler {
         participants: _isGeraTool ? [toolName, "Gera"] : [toolName, "git"],
       };
 
-      console.log("[akame-diag] calling batchOrDirect, sessionId=" + context.sessionId + ", toolName=" + toolName);
+      this.log.debug("calling batchOrDirect, sessionId=" + context.sessionId + ", toolName=" + toolName);
       await this.batchOrDirect(context, {
         sessionId: context.sessionId,
         event: "tool",
         enqueuedAt: Date.now(),
       });
-      console.log("[akame-diag] batchOrDirect completed");
+      this.log.debug("batchOrDirect completed");
     } catch (err) {
       this.log.error('tool.execute.after ошибка грануляции', { toolName, eventType: 'tool', error: err instanceof Error ? err.message : String(err) });
     }
