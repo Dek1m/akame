@@ -22,6 +22,13 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+const LEVEL_NAMES: Record<LogLevel, string> = {
+  [LogLevel.DEBUG]: "DEBUG",
+  [LogLevel.INFO]: "INFO",
+  [LogLevel.WARN]: "WARN",
+  [LogLevel.ERROR]: "ERROR",
+};
+
 function parseLogLevel(env?: string): LogLevel {
   switch (env?.toLowerCase()) {
     case "debug": return LogLevel.DEBUG;
@@ -32,15 +39,38 @@ function parseLogLevel(env?: string): LogLevel {
   }
 }
 
+const JSON_MODE = process.env.AKAME_LOG_FORMAT === "json";
+
+function formatMessage(level: LogLevel, msg: string, ctx?: LogContext): string {
+  const timestamp = new Date().toISOString();
+  const levelName = LEVEL_NAMES[level];
+
+  if (JSON_MODE) {
+    const entry: Record<string, unknown> = {
+      timestamp,
+      level: levelName,
+      service: "akame",
+      message: msg,
+    };
+    if (ctx && Object.keys(ctx).length > 0) entry.meta = ctx;
+    return JSON.stringify(entry);
+  }
+
+  const meta = ctx && Object.keys(ctx).length > 0 ? ` ${JSON.stringify(ctx)}` : "";
+  return `[${timestamp}] [${levelName}] [akame] ${msg}${meta}`;
+}
+
 // ── Класс Logger ──
 
+type Client = { app: { log: (opts: { body: { service: string; level: "debug" | "info" | "error" | "warn"; message: string } }) => Promise<unknown> } };
+
 export class Logger {
-  private client: { app: { log: (opts: { body: { service: string; level: "debug" | "info" | "error" | "warn"; message: string } }) => Promise<unknown> } };
+  private client: Client;
   private minLevel: LogLevel;
   private context: LogContext;
 
   constructor(
-    client: { app: { log: (opts: { body: { service: string; level: "debug" | "info" | "error" | "warn"; message: string } }) => Promise<unknown> } },
+    client: Client,
     minLevel?: LogLevel,
     context?: LogContext
   ) {
@@ -53,14 +83,14 @@ export class Logger {
     if (level < this.minLevel) return;
 
     const merged = { ...this.context, ...ctx };
-    const ctxStr = Object.keys(merged).length > 0 ? ` ${JSON.stringify(merged)}` : "";
+    const line = formatMessage(level, msg, Object.keys(merged).length > 0 ? merged : undefined);
 
     this.client.app
       .log({
         body: {
           service: "akame",
           level: levelName as "debug" | "info" | "error" | "warn",
-          message: `[${levelName.toUpperCase()}] ${msg}${ctxStr}`,
+          message: line,
         },
       })
       .catch(() => {

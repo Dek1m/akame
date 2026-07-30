@@ -1,6 +1,7 @@
 // ── Схема грануляции — типы и JSON Schema для structured output LLM ──
 
 import type { Namespace } from "../constants.js";
+import type { Logger } from "../logger.js";
 
 // ── Универсальный тип EntityType для ВСЕХ namespace ──
 
@@ -311,7 +312,8 @@ export const GRANULATOR_JSON_SCHEMA = {
 // ── Валидация ответа LLM ──
 
 export function validateGranules(
-  output: unknown
+  output: unknown,
+  log?: Logger
 ): GranulatorOutput {
   if (!output || typeof output !== "object") {
     throw new Error("Ответ LLM не является объектом");
@@ -330,7 +332,7 @@ export function validateGranules(
   const granules: Granule[] = [];
 
   for (let i = 0; i < obj.granules.length; i++) {
-    const g = validateGranule(obj.granules[i], i);
+    const g = validateGranule(obj.granules[i], i, log);
     granules.push(g);
   }
 
@@ -339,7 +341,8 @@ export function validateGranules(
 
 function validateGranule(
   g: unknown,
-  index: number
+  index: number,
+  log?: Logger
 ): Granule {
   if (!g || typeof g !== "object") {
     throw new Error(`Гранула [${index}]: не является объектом`);
@@ -463,9 +466,7 @@ function validateGranule(
           (allowedTypes) => allowedTypes.includes("*") || allowedTypes.includes(linkType)
         );
         if (!isAllowed) {
-          console.warn(
-            `[akame] Гранула [${index}]: links[${li}].type="${linkType}" не найден в CROSS_NAMESPACE_LINK_RULES для source="${sourceNs}"`
-          );
+          log?.warn(`Гранула [${index}]: links[${li}].type="${linkType}" не найден в CROSS_NAMESPACE_LINK_RULES для source="${sourceNs}"`);
         }
       }
     }

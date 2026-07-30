@@ -88,7 +88,7 @@ export async function enrichLinks(
 
     for (const granule of newGranules) {
       const meta = granule.metadata as Record<string, unknown>;
-      const importance = Number(meta?.importance ?? 3);
+      const importance = Number((granule as unknown as Record<string, unknown>)?.importance ?? meta?.importance ?? 3);
 
       // Не связываем гранулы с importance=1
       if (importance <= 1) continue;

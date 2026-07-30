@@ -382,7 +382,7 @@ export async function granulate(
 ): Promise<void> {
   const mcp = new MCPClient(config);
   const { NamespaceRegistry } = await import("../namespace-registry.js");
-  const registry = new NamespaceRegistry(mcp);
+  const registry = new NamespaceRegistry(mcp, log);
   const promptBuilder = new PromptBuilder(config, log, mcp, registry);
   const engine = new GranulationEngine(config, log, mcp, promptBuilder);
   return engine.granulate(input, context);
@@ -396,7 +396,7 @@ export async function granulateBatch(
 ): Promise<void> {
   const mcp = new MCPClient(config);
   const { NamespaceRegistry } = await import("../namespace-registry.js");
-  const registry = new NamespaceRegistry(mcp);
+  const registry = new NamespaceRegistry(mcp, log);
   const promptBuilder = new PromptBuilder(config, log, mcp, registry);
   const engine = new GranulationEngine(config, log, mcp, promptBuilder);
   return engine.granulateBatch(input, entries);

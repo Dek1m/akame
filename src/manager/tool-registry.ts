@@ -20,7 +20,7 @@ export function registerTools(
   mcp: MCPClient,
   directory: string
 ): Record<string, ToolDefinition> {
-  const registry = new NamespaceRegistry(mcp);
+  const registry = new NamespaceRegistry(mcp, log);
 
   return {
     granulate_output: createGranulateTool(config, log, mcp),

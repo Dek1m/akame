@@ -18,6 +18,7 @@ export interface GranuleEntry {
   content: string;
   metadata?: Record<string, unknown>;
   namespace?: string;
+  importance?: number;
 }
 
 export interface IngestBatchResult {

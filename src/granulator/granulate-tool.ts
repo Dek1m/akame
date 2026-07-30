@@ -197,13 +197,14 @@ export function createGranulateTool(
       };
 
       // Валидация по расширенной схеме
-      const validated = validateGranules(granulesInput);
+      const validated = validateGranules(granulesInput, log);
       log.debug('Валидация пройдена', { granuleCount: validated.granules.length });
 
       // Отправка в athena-memory
       const entries = validated.granules.map((g) => ({
         content: g.content,
         namespace: g.namespace,
+        importance: g.importance,
         metadata: g.metadata as unknown as Record<string, unknown>,
       }));
 

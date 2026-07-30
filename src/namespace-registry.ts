@@ -4,17 +4,20 @@
 
 import type { NamespaceRecord } from "./mcp/client.js";
 import type { MCPClient } from "./mcp/client.js";
+import type { Logger } from "./logger.js";
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
 
 export class NamespaceRegistry {
   private client: MCPClient;
+  private log: Logger;
   private cache: NamespaceRecord[] | null = null;
   private cacheTime = 0;
   private fetchPromise: Promise<NamespaceRecord[]> | null = null;
 
-  constructor(client: MCPClient) {
+  constructor(client: MCPClient, log: Logger) {
     this.client = client;
+    this.log = log;
   }
 
   /**
@@ -80,7 +83,9 @@ export class NamespaceRegistry {
       return await this.client.namespaces();
     } catch (err) {
       // Fallback: дефолтные namespace если сервер недоступен
-      console.error("Failed to fetch namespaces from server, using defaults:", err);
+      this.log.error("Failed to fetch namespaces from server, using defaults", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return [
         { uid: "user_facts", name: "User Facts", description: "Профили, характеры, предпочтения пользователя" },
         { uid: "project_meta", name: "Project Meta", description: "Архитектурные решения, статус проекта" },

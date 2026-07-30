@@ -334,7 +334,7 @@ export function createGraphHealthTool(config: AkameConfig, log: Logger, mcp: MCP
       for (const ns of namespaces) {
         for (const g of nsGranules[ns] ?? []) {
           const meta = g.metadata as Record<string, unknown>;
-          const importance = Number(meta?.importance ?? 3);
+          const importance = Number((g as unknown as Record<string, unknown>)?.importance ?? meta?.importance ?? 3);
           const links = extractLinks(meta);
           const hasOutgoing = links.length > 0;
           const hasInc = hasIncoming.has(g.id);

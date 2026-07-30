@@ -45,7 +45,7 @@ export class PluginManager {
 
     this.log.debug("PluginManager constructor: config.batch.enabled=" + config.batch.enabled);
 
-    this.registry = new NamespaceRegistry(mcp);
+    this.registry = new NamespaceRegistry(mcp, log);
     this.promptBuilder = new PromptBuilder(config, log, mcp, this.registry);
     this.log.debug("PromptBuilder created");
 
