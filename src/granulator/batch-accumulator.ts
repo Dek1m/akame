@@ -30,6 +30,10 @@ export class BatchAccumulator {
   private flushing: boolean = false;
   private disposed: boolean = false;
 
+  // Периодическая проверка очереди (каждые 60 сек)
+  private static readonly PERIODIC_FLUSH_INTERVAL_MS = 60_000;
+  private periodicFlushTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
     private config: AkameConfig,
     private log: Logger,
@@ -37,6 +41,14 @@ export class BatchAccumulator {
   ) {
     // Фоновая очистка recentlyFlushed раз в 30 сек
     this.flushTimerRecentlies = setInterval(() => this._cleanRecentlies(), this.RECENTLY_TTL);
+
+    // Периодический flush: сбрасывает накопленное раз в 60 сек
+    this.periodicFlushTimer = setInterval(() => {
+      if (this.queue.length > 0 && !this.flushing) {
+        this.log.debug("batch: periodic flush", { queueSize: this.queue.length });
+        this.doFlush();
+      }
+    }, BatchAccumulator.PERIODIC_FLUSH_INTERVAL_MS);
   }
 
   private _isRecentlyFlushed(sessionId: string): boolean {
@@ -143,6 +155,10 @@ export class BatchAccumulator {
     if (this.flushTimerRecentlies !== null) {
       clearInterval(this.flushTimerRecentlies);
       this.flushTimerRecentlies = null;
+    }
+    if (this.periodicFlushTimer !== null) {
+      clearInterval(this.periodicFlushTimer);
+      this.periodicFlushTimer = null;
     }
 
     const err = new Error('BatchAccumulator disposed');

@@ -13,6 +13,25 @@ const GRANULATABLE_TOOL_SUFFIXES = [
   "git", "bash", "gh",
   // Gera — веб-поиск
   "web_search", "web_fetch", "web_crawl",
+  // Файловые операции
+  "read", "edit", "write",
+  // Поиск в кодовой базе
+  "glob", "grep",
+  // Агенты и навыки
+  "task", "skill",
+  // Планирование
+  "todowrite",
+  // Планировщик (ino)
+  "ino_create", "ino_update", "ino_delete", "ino_list", "ino_logs", "ino_get",
+  // MCP-тулы athena-memory (read-only — пишет только Тишь)
+  "memory_search", "memory_recent", "memory_get", "memory_list",
+  "memory_stats", "memory_find_similar", "memory_get_relations",
+  "memory_traverse", "memory_graph_stats", "memory_namespaces", "memory_version",
+  // Хеши
+  "hash_upsert", "hash_get", "hash_list", "hash_delete",
+  // Код-интеллект
+  "code_index", "code_diff", "code_graph", "dependency_analyzer",
+  "graph_health", "migrate_legacy_granules",
 ];
 
 function isGranulatableTool(toolName: string): boolean {
