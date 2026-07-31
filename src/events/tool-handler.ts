@@ -34,6 +34,26 @@ const GRANULATABLE_TOOL_SUFFIXES = [
   "graph_health", "migrate_legacy_granules",
 ];
 
+// Тривиальные тулы — их tool_result не содержит значимых знаний для грануляции.
+// opencode не передаёт MCP-результат в toolOutput, поэтому для этих тулов
+// контекст = только имя тула + query, что бессмысленно гранулировать.
+const TRIVIAL_TOOL_SUFFIXES = [
+  "read", "glob", "grep", "skill", "todowrite",
+  "memory_search", "memory_recent", "memory_get", "memory_list",
+  "memory_stats", "memory_find_similar", "memory_get_relations",
+  "memory_traverse", "memory_graph_stats", "memory_namespaces", "memory_version",
+  "hash_upsert", "hash_get", "hash_list", "hash_delete",
+  "task",
+  // ino-тулы — тривиальные CRUD-операции
+  "ino_create", "ino_update", "ino_delete", "ino_list", "ino_logs", "ino_get",
+];
+
+function isTrivialTool(toolName: string): boolean {
+  return TRIVIAL_TOOL_SUFFIXES.some(
+    (suffix) => toolName === suffix || toolName.endsWith(`_${suffix}`) || toolName.endsWith(`-${suffix}`)
+  );
+}
+
 function isGranulatableTool(toolName: string): boolean {
   return GRANULATABLE_TOOL_SUFFIXES.some(
     (suffix) => toolName === suffix || toolName.endsWith(`_${suffix}`) || toolName.endsWith(`-${suffix}`)
@@ -93,6 +113,12 @@ export class ToolHandler extends BaseEventHandler {
     // Фильтруем только гранулируемые инструменты (с учётом MCP-префиксов)
     if (!isGranulatableTool(toolName)) {
       this.log.debug("handleAfter: not granulatable, skipping");
+      return;
+    }
+
+    // Пропускаем тривиальные тулы — их результат не содержит значимых знаний
+    if (isTrivialTool(toolName)) {
+      this.log.debug("handleAfter: trivial tool, skipping granulation", { toolName });
       return;
     }
 

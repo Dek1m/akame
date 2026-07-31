@@ -37,7 +37,7 @@ export class GranulationEngine {
   private promptBuilder: PromptBuilder;
   private serviceSessions: Set<string> = new Set();
   private sessionDataStore: Map<string, SessionData> = new Map();
-  private static readonly LLM_TIMEOUT_MS = 120_000; // 2 минуты
+  private static readonly LLM_TIMEOUT_MS = 300_000; // 5 минут — aitunnel/deepseek-v4-flash может быть медленным
   private static readonly STORE_TTL = 10 * 60 * 1000; // 10 минут
   private static readonly MIN_MESSAGES = 3;
 
