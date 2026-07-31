@@ -242,24 +242,58 @@
 
 ---
 
-## Процесс перезапуска opencode
+## Стандарт развертывания [НОВЫЙ]
 
-После изменения кода плагина необходимо пересобрать и перезапустить opencode на сервере `ai.atom.ui`:
+> Детали: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+
+### Принципы
+
+1. **Сборка ТОЛЬКО через compose** — `docker compose build akame`
+2. **Context = git-клон проекта** — `docker-compose.yml` в корне репозитория
+3. **Dockerfile относительно context** — `dockerfile: Dockerfile`
+4. **GH Actions через compose** — используем `docker/build-push-action`
+
+### Файлы
+
+| Файл | Назначение |
+|------|------------|
+| `Dockerfile` | Многостадийная сборка (builder → production) |
+| `docker-compose.yml` | Определение сервисов (akame, dev-окружение) |
+| `deploy.sh` | Скрипт деплоя (SSH/rsync) |
+| `.dockerignore` | Исключения для build context |
+| `.github/workflows/deploy.yml` | CI/CD (build → deploy → health check) |
+
+### Команды
 
 ```bash
-# 1. Сборка плагина
-cd /home/opencode/projects/akame && npm run build
+# Сборка
+docker compose build akame
 
-# 2. Копирование в директорию плагинов opencode
-cp -r dist/* /home/opencode/.config/opencode/plugins/akame/
+# Dev-окружение
+docker compose --profile dev up -d
 
-# 3. Перезапуск Docker-контейнера opencode на сервере
-ssh -i ~/.config/opencode/.ssh/svc_athene_ai@atom.ui.key svc_athene_ai@ai.atom.ui "docker restart opencode"
+# Деплой
+./deploy.sh
+
+# Откат
+./deploy.sh --rollback v0.10.0
+```
+
+### Автоматический деплой
+
+При пуше в `main`:
+1. CI: `npm ci` → `tsc` → `vitest` → `docker build`
+2. CD: `rsync dist/` → `docker restart` → `health check`
+
+### Rollback
+
+```bash
+gh workflow run deploy.yml -f rollback_tag=v0.10.0
 ```
 
 ---
 
-## Актуальная структура проекта (20+ файлов)
+## Актуальная структура проекта (25+ файлов)
 
 ```
 akame/
@@ -268,6 +302,11 @@ akame/
 ├── opencode.json.example                # Permission rules (deny/allow)
 ├── .env.example                         # 16 из 18 переменных окружения
 ├── vitest.config.ts
+│
+├── Dockerfile                           # [НОВЫЙ] Многостадийная сборка плагина
+├── docker-compose.yml                   # [НОВЫЙ] Определение сервисов
+├── deploy.sh                            # [НОВЫЙ] Скрипт деплоя (SSH/rsync)
+├── .dockerignore                        # [НОВЫЙ] Исключения для build context
 │
 ├── src/
 │   ├── index.ts                         # Точка входа — Plugin function.
@@ -334,9 +373,15 @@ akame/
 ├── docs/
 │   ├── ARCHITECTURE.md                  # [требует актуализации]
 │   ├── CONFIGURATION.md                 # [требует актуализации]
+│   ├── DEPLOYMENT.md                    # [НОВЫЙ] Стандарт развертывания
 │   ├── GRANULATION.md                   # Правила грануляции
 │   ├── GRANULATION_STANDARD.md          # Полный стандарт грануляции (сущности, связи)
 │   └── PLAN_CODE_INDEX.md               # План code_index
+│
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                       # Тестирование (PR)
+│       └── deploy.yml                   # [НОВЫЙ] Сборка + деплой (main)
 │
 └── README.md                            # [требует актуализации]
 ```
@@ -413,4 +458,5 @@ CNLM-валидация в `validateGranules()` — неблокирующая (
 | 2026-07-25 | Ретроспективная линковка: user_facts связность 30% → 72% |
 | 2026-07-25 | Аудит: 15 проблем (2 P0, 8 P1, 4 P2, 1 P3) |
 | 2026-07-25 | Дедупликация: 50 записей помечены `is_deprecated` |
-| **2026-07-25** | **Актуальное состояние: 702 гранулы, 88 тестов, 12 фаз завершено** |
+| 2026-07-25 | Актуальное состояние: 702 гранулы, 88 тестов, 12 фаз завершено |
+| **2026-07-30** | **Стандарт развертывания: Dockerfile, docker-compose.yml, deploy.sh, deploy.yml** |
