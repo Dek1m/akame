@@ -56,7 +56,8 @@ export interface MemoryStats {
 export class MCPClient {
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
-  private readonly timeout: number;
+  private readonly readTimeout: number;
+  private readonly writeTimeout: number;
   private readonly circuit: CircuitBreaker;
   private readonly retryConfig: Partial<RetryConfig>;
 
@@ -69,7 +70,9 @@ export class MCPClient {
     if (config.apiKey) {
       this.headers["Authorization"] = `Bearer ${config.apiKey}`;
     }
-    this.timeout = 30000;
+    this.readTimeout = 30000;
+    // write-операции (store, ingestBatch) требуют больше времени из-за dedup + embedding
+    this.writeTimeout = 120000;
     this.circuit = new CircuitBreaker({ failureThreshold: 5, resetTimeoutMs: 30000 });
     this.retryConfig = { maxRetries: 3, initialDelayMs: 500, maxDelayMs: 5000 };
   }
@@ -214,7 +217,7 @@ export class MCPClient {
 
   /**
    * Вызов MCP-сервера с retry и circuit breaker.
-   * @param isReadOperation — если true, используются retry. Write-операции (store, update, delete, ingestBatch) — без retry.
+   * @param isReadOperation — если true, используются retry и readTimeout. Write-операции — без retry и с writeTimeout.
    */
   private async call(
     method: string,
@@ -228,6 +231,7 @@ export class MCPClient {
       );
     }
 
+    const timeout = isReadOperation ? this.readTimeout : this.writeTimeout;
     const doRequest = async (): Promise<unknown> => {
       const id = crypto.randomUUID();
       const payload = {
@@ -241,7 +245,7 @@ export class MCPClient {
       };
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeout);
+      const timer = setTimeout(() => controller.abort(), timeout);
 
       try {
         const response = await fetch(this.baseUrl, {
@@ -264,22 +268,40 @@ export class MCPClient {
         const lines = raw.split("\n").filter((l) => l.startsWith("data: "));
         if (lines.length > 0) {
           const lastData = lines[lines.length - 1];
-          const parsed = JSON.parse(lastData.slice(6));
+          const slice = lastData.slice(6).trim();
+          // Проверяем что данные не являются ошибкой (начинаются с "Error")
+          if (slice.startsWith("Error") || slice.startsWith("error")) {
+            throw new Error(`MCP LLM error: ${slice.slice(0, 200)}`);
+          }
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(slice);
+          } catch {
+            throw new Error(`MCP JSON parse error: ${slice.slice(0, 200)}`);
+          }
           if (parsed.error) {
+            const err = parsed.error as Record<string, unknown>;
             throw new Error(
-              `MCP error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`,
+              `MCP error: ${(err.message as string) ?? JSON.stringify(err)}`,
             );
           }
-          return parsed.result?.content?.[0]?.text
-            ? JSON.parse(parsed.result.content[0].text)
-            : parsed.result;
+          const result = parsed.result as Record<string, unknown> | undefined;
+          const content = result?.content as Array<Record<string, unknown>> | undefined;
+          const text = content?.[0]?.text;
+          return typeof text === "string" ? JSON.parse(text) : result;
         }
 
         // Прямой JSON-RPC ответ
-        const parsed = JSON.parse(raw);
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          throw new Error(`MCP JSON parse error (raw): ${raw.slice(0, 200)}`);
+        }
         if (parsed.error) {
+          const err = parsed.error as Record<string, unknown>;
           throw new Error(
-            `MCP error: ${parsed.error.message ?? JSON.stringify(parsed.error)}`,
+            `MCP error: ${(err.message as string) ?? JSON.stringify(err)}`,
           );
         }
         return parsed.result;
