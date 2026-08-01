@@ -1,0 +1,32 @@
+name: Auto-deploy akame on main
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync code to server
+        run: |
+          rsync -av --delete \
+            $GITHUB_WORKSPACE/ \
+            /home/svc_athene_ai@atom.ui/opencode/projects/akame/
+
+      - name: Build and deploy plugin
+        run: |
+          cd /home/svc_athene_ai@atom.ui/opencode/projects/akame
+          npm ci
+          npx tsc
+          CONTAINER=$(docker ps -q --filter "name=opencode")
+          docker cp dist $CONTAINER:/home/opencode/.config/opencode/plugins/akame/dist
+          docker cp package.json $CONTAINER:/home/opencode/.config/opencode/plugins/akame/package.json
+          docker restart $CONTAINER
+          echo "akame deployed"
+
+      - name: Cleanup
+        run: docker image prune -af --filter "until=24h"
+        continue-on-error: true

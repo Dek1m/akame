@@ -1,0 +1,213 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Только сборка, без деплоя'
+        required: false
+        default: 'false'
+        type: boolean
+      rollback_tag:
+        description: 'Тег для отката (пусто = деплой latest)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Отменяем предыдущие запуски для той же ветки
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Сборка и тестирование ──
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx vitest run --reporter=verbose
+
+      - name: Build TypeScript
+        run: npx tsc
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image
+        run: |
+          docker pull ${{ steps.meta.outputs.tags | head -1 }}
+          docker run --rm ${{ steps.meta.outputs.tags | head -1 }} node --eval "console.log('ok')"
+
+  # ── Job 2: Деплой на сервер ──
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: |
+      github.event_name == 'push' && 
+      github.ref == 'refs/heads/main' &&
+      inputs.dry_run != 'true'
+    environment:
+      name: production
+      url: https://ai.atom.ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ vars.DEPLOY_SERVER || 'ai.atom.ui' }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy via rsync
+        env:
+          SERVER: ${{ vars.DEPLOY_SERVER || 'ai.atom.ui' }}
+          USER: ${{ vars.DEPLOY_USER || 'svc_athene_ai' }}
+          PLUGIN_DIR: ${{ vars.DEPLOY_PLUGIN_DIR || '/home/opencode/.config/opencode/plugins/akame' }}
+          CONTAINER: ${{ vars.DEPLOY_CONTAINER || 'opencode' }}
+        run: |
+          echo "Deploying to ${USER}@${SERVER}..."
+
+          # Копируем собранные файлы
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            dist/ \
+            "${USER}@${SERVER}:${PLUGIN_DIR}/dist/"
+
+          # Копируем package.json
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            package.json \
+            "${USER}@${SERVER}:${PLUGIN_DIR}/package.json"
+
+          # Перезапускаем контейнер
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${USER}@${SERVER}" \
+            "docker restart ${CONTAINER}"
+
+          # Ждём healthy статуса
+          echo "Waiting for container health..."
+          for i in $(seq 1 30); do
+            STATUS=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+              "${USER}@${SERVER}" \
+              "docker inspect --format='{{.State.Health.Status}}' ${CONTAINER} 2>/dev/null" || echo "unknown")
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Container is healthy"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Verify deployment
+        env:
+          SERVER: ${{ vars.DEPLOY_SERVER || 'ai.atom.ui' }}
+          USER: ${{ vars.DEPLOY_USER || 'svc_athene_ai' }}
+        run: |
+          # Проверяем версию плагина
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${USER}@${SERVER}" \
+            "docker exec opencode cat /home/opencode/.config/opencode/plugins/akame/package.json | jq -r .version"
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -rf ~/.ssh/deploy_key
+
+  # ── Job 3: Rollback ──
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    if: inputs.rollback_tag != ''
+    needs: []
+
+    steps:
+      - name: Rollback to tag
+        env:
+          TAG: ${{ inputs.rollback_tag }}
+          SERVER: ${{ vars.DEPLOY_SERVER || 'ai.atom.ui' }}
+          USER: ${{ vars.DEPLOY_USER || 'svc_athene_ai' }}
+          CONTAINER: ${{ vars.DEPLOY_CONTAINER || 'opencode' }}
+        run: |
+          echo "Rolling back to ${TAG}..."
+
+          # Pull старого образа
+          docker pull ghcr.io/${{ github.repository }}:${TAG}
+
+          # Restart контейнера на сервере
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${USER}@${SERVER}" \
+            "docker pull ghcr.io/${{ github.repository }}:${TAG} && \
+             docker tag ghcr.io/${{ github.repository }}:${TAG} ghcr.io/${{ github.repository }}:latest && \
+             docker restart ${CONTAINER}"
+
+          echo "Rollback complete"
