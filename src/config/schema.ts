@@ -1,4 +1,5 @@
-import { DEFAULTS } from "./defaults.js";
+import { DEFAULTS, JSON5_KEY_MAP } from "./defaults.js";
+import { loadConfigFile } from "./file-loader.js";
 import type {
   TriggerConfig,
   BatchConfig,
@@ -27,11 +28,15 @@ export class AkameConfig {
   constructor(
     env: Record<string, string | undefined> = process.env
   ) {
-    this.triggers = this._loadTriggers(env);
-    this.batch = this._loadBatch(env);
-    this.cooldown = this._loadCooldown(env);
-    this.enrich = this._loadEnrich(env);
-    this.mcp = this._loadMCP(env);
+    // Каскад: defaults → JSON5 файл → env (env перезаписывает)
+    const fileConfig = loadConfigFile();
+    const mergedEnv = this._mergeFileConfig(env, fileConfig);
+
+    this.triggers = this._loadTriggers(mergedEnv);
+    this.batch = this._loadBatch(mergedEnv);
+    this.cooldown = this._loadCooldown(mergedEnv);
+    this.enrich = this._loadEnrich(mergedEnv);
+    this.mcp = this._loadMCP(mergedEnv);
   }
 
   // ── Фабричный метод ──
@@ -65,6 +70,35 @@ export class AkameConfig {
   }
 
   // ── Приватные загрузчики ──
+
+  private _mergeFileConfig(
+    env: Record<string, string | undefined>,
+    fileConfig: { source: string; data: Record<string, unknown> } | null
+  ): Record<string, string | undefined> {
+    if (!fileConfig) return env;
+
+    const result = { ...env };
+
+    // Мержим JSON5 → env (только если env не задан явно)
+    for (const [json5Key, envKey] of Object.entries(JSON5_KEY_MAP)) {
+      const fileValue = fileConfig.data[json5Key];
+      if (fileValue === undefined) continue;
+
+      const envName = `AKAME_${envKey}`;
+      if (result[envName] !== undefined) continue; // env приоритетнее
+
+      // Конвертируем значение в строку (как в env)
+      if (typeof fileValue === "boolean") {
+        result[envName] = fileValue ? "true" : "false";
+      } else if (typeof fileValue === "number") {
+        result[envName] = String(fileValue);
+      } else if (typeof fileValue === "string") {
+        result[envName] = fileValue;
+      }
+    }
+
+    return result;
+  }
 
   private _loadTriggers(env: Record<string, string | undefined>): TriggerConfig {
     return {

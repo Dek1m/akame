@@ -375,19 +375,113 @@ AKAME_ENRICH_PROMPT=true
 
 ---
 
-## Приоритет источников конфигурации
+## JSON5 конфигурация
 
-1. **Переменные окружения** — наивысший приоритет
-2. **opencode.json** (`env` блок) — второй приоритет
-3. **Дефолты в constants.ts** — fallback
+Альтернатива env-переменным — файл `akame.json5`. Поддерживает комментарии, trailing commas и нестрогий синтаксис JSON.
+
+### Каскад загрузки
+
+```
+defaults.ts → akame.json5 → AKAME_* env
+```
+
+Каждый следующий источник перезаписывает предыдущий. Env-переменные **всегда** имеют наивысший приоритет.
+
+### Поиск файла
+
+| Приоритет | Путь | Описание |
+|---|---|---|
+| 1 | `./akame.json5` | Рядом с `opencode.json` (локальный) |
+| 2 | `~/.config/opencode/akame.json5` | Глобальный для пользователя |
+
+Если файл не найден — используются дефолты из `defaults.ts`. Если найден, но содержит ошибку парсинга — выводится предупреждение в консоль, используются дефолты.
+
+### Формат akame.json5
+
+```json5
+{
+  // ── MCP-сервер athena-memory ──
+  mcpUrl: "http://athena-memory:8000/mcp/",
+  apiKey: "sk-athena-your-key",   // опционально
+  userId: "akame",
+
+  // ── Триггеры грануляции ──
+  idle: true,           // session.idle → грануляция
+  compacted: true,      // session.compacted → финальная
+  diff: false,          // session.diff → инкрементальная
+  fileEdited: false,    // file.edited → diff'ы
+  fileWatcher: false,   // file.watcher.updated
+  toolAfter: true,      // tool.execute.after → git/Gera
+  toolBefore: false,    // tool.execute.before → pre-processing
+  command: false,       // command.executed
+
+  // ── Cooldown и лимиты ──
+  cooldownMs: 30000,       // Мин. время между грануляциями (мс)
+  debounceMs: 2000,        // Debounce для file.edited (мс)
+  maxBatch: 20,            // Макс. гранул в MCP batch-запросе
+  maxMessages: 50,         // Макс. сообщений для анализа
+
+  // ── Обогащение гранул ──
+  enrichLinks: true,       // Автосвязи между гранулами
+  enrichPrompt: true,      // Внедрение релевантных гранул в промпт
+
+  // ── Batch-обработка ──
+  batchEnabled: true,      // Группировка диалогов в batch
+  batchSize: 5,            // Макс. диалогов в одном batch
+  batchMaxAgeMs: 3600000   // Макс. время ожидания batch (1 час)
+}
+```
+
+### Маппинг JSON5-ключей → env-переменные
+
+| JSON5 ключ | Env-переменная | Тип |
+|---|---|---|
+| `mcpUrl` | `AKAME_MCP_URL` | string |
+| `apiKey` | `AKAME_API_KEY` | string |
+| `userId` | `AKAME_USER_ID` | string |
+| `idle` | `AKAME_GRANULATE_IDLE` | boolean |
+| `compacted` | `AKAME_GRANULATE_COMPACTED` | boolean |
+| `diff` | `AKAME_GRANULATE_DIFF` | boolean |
+| `fileEdited` | `AKAME_GRANULATE_FILE` | boolean |
+| `fileWatcher` | `AKAME_GRANULATE_FILE_WATCHER` | boolean |
+| `toolAfter` | `AKAME_GRANULATE_TOOL` | boolean |
+| `toolBefore` | `AKAME_GRANULATE_TOOL_BEFORE` | boolean |
+| `command` | `AKAME_GRANULATE_COMMAND` | boolean |
+| `cooldownMs` | `AKAME_COOLDOWN_MS` | number |
+| `debounceMs` | `AKAME_DEBOUNCE_MS` | number |
+| `maxBatch` | `AKAME_MAX_BATCH` | number |
+| `maxMessages` | `AKAME_MAX_MESSAGES` | number |
+| `enrichLinks` | `AKAME_ENRICH_LINKS` | boolean |
+| `enrichPrompt` | `AKAME_ENRICH_PROMPT` | boolean |
+| `batchEnabled` | `AKAME_BATCH_ENABLED` | boolean |
+| `batchSize` | `AKAME_BATCH_SIZE` | number |
+| `batchMaxAgeMs` | `AKAME_BATCH_MAX_AGE_MS` | number |
+
+### Приоритеты
+
+```
+AKAME_* env  >  akame.json5  >  defaults.ts
+```
 
 Пример:
 
 ```bash
+# В akame.json5: maxBatch = 50
 # В .env: AKAME_MAX_BATCH=20
-# В opencode.json: AKAME_MAX_BATCH=50
-# Результат: 50 (opencode.json перезаписывает .env)
+# Результат: 20 (env перезаписывает файл)
 ```
+
+### Когда использовать JSON5
+
+- Когда нужно хранить конфигурацию в репозитории (version control)
+- Когда удобнее редактировать структурированный файл, чем список переменных
+- Когда нужна типизация ключей (IDE подсказывает опечатки)
+
+### Когда использовать env-переменные
+
+- Когда значение зависит от окружения (dev/staging/prod)
+- Когда секреты хранятся в vault или CI/CD
+- Когда нужно переопределять отдельные значения без правки файла
 
 ---
 

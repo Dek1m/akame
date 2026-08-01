@@ -216,7 +216,9 @@ export function createGranulateTool(
           totalInserted += result.inserted;
           log.debug('MCP batch', { inserted: result.inserted, skipped: result.skipped, updated: result.updated });
         } catch (err) {
-          log.error('MCP ошибка', { error: err instanceof Error ? err.message : String(err) });
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error('MCP ошибка', { error: msg });
+          throw new Error(`MCP ingestBatch failed: ${msg}`);
         }
       }
 

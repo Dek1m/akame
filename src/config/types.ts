@@ -55,6 +55,78 @@ export interface MCPConfig {
   readonly userId: string;
 }
 
+// ── Структура JSON5 файла ──
+
+/**
+ * Плоский интерфейс конфигурации akame.json5.
+ *
+ * Все поля опциональны — отсутствующие значения берутся из DEFAULTS.
+ * Ключи именуются в camelCase (в отличие от env-переменных AKAME_* в UPPER_SNAKE_CASE).
+ *
+ * Маппинг JSON5-ключей → env-переменные определён в `JSON5_KEY_MAP` (defaults.ts).
+ *
+ * @example
+ * ```json5
+ * {
+ *   mcpUrl: "http://athena-memory:8000/mcp/",
+ *   userId: "akame",
+ *   idle: true,
+ *   cooldownMs: 30000
+ * }
+ * ```
+ */
+export interface AkameFileConfig {
+  // MCP
+  /** URL athena-memory MCP сервера (@see AKAME_MCP_URL) */
+  mcpUrl?: string;
+  /** API-ключ для авторизации (@see AKAME_API_KEY) */
+  apiKey?: string;
+  /** ID пользователя в athena-memory (@see AKAME_USER_ID) */
+  userId?: string;
+
+  // Триггеры
+  /** Гранулировать при session.idle (@see AKAME_GRANULATE_IDLE) */
+  idle?: boolean;
+  /** Гранулировать при file.edited (@see AKAME_GRANULATE_FILE) */
+  fileEdited?: boolean;
+  /** Гранулировать при tool.execute.after (@see AKAME_GRANULATE_TOOL) */
+  toolAfter?: boolean;
+  /** Гранулировать при session.compacted (@see AKAME_GRANULATE_COMPACTED) */
+  compacted?: boolean;
+  /** Гранулировать при session.diff (@see AKAME_GRANULATE_DIFF) */
+  diff?: boolean;
+  /** Гранулировать при file.watcher.updated (@see AKAME_GRANULATE_FILE_WATCHER) */
+  fileWatcher?: boolean;
+  /** Pre-processing при tool.execute.before (@see AKAME_GRANULATE_TOOL_BEFORE) */
+  toolBefore?: boolean;
+  /** Гранулировать при command.executed (@see AKAME_GRANULATE_COMMAND) */
+  command?: boolean;
+
+  // Настройки
+  /** Мин. время между грануляциями, мс (@see AKAME_COOLDOWN_MS) */
+  cooldownMs?: number;
+  /** Debounce для file.edited, мс (@see AKAME_DEBOUNCE_MS) */
+  debounceMs?: number;
+  /** Макс. гранул в MCP batch-запросе (@see AKAME_MAX_BATCH) */
+  maxBatch?: number;
+  /** Макс. сообщений для анализа (@see AKAME_MAX_MESSAGES) */
+  maxMessages?: number;
+
+  // Обогащение
+  /** Автосвязи между гранулами (@see AKAME_ENRICH_LINKS) */
+  enrichLinks?: boolean;
+  /** Внедрение релевантных гранул в промпт (@see AKAME_ENRICH_PROMPT) */
+  enrichPrompt?: boolean;
+
+  // Batch
+  /** Группировка диалогов в batch (@see AKAME_BATCH_ENABLED) */
+  batchEnabled?: boolean;
+  /** Макс. диалогов в одном batch (@see AKAME_BATCH_SIZE) */
+  batchSize?: number;
+  /** Макс. время ожидания batch, мс (@see AKAME_BATCH_MAX_AGE_MS) */
+  batchMaxAgeMs?: number;
+}
+
 // ── Плоский интерфейс для обратной совместимости ──
 
 /** @deprecated Используй AkameConfig (класс из schema.ts) */

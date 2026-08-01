@@ -6,6 +6,8 @@
 import { AkameConfig } from "./config/schema.js";
 
 export { AkameConfig } from "./config/schema.js";
+export { loadConfigFile } from "./config/file-loader.js";
+export type { FileConfig } from "./config/file-loader.js";
 export type { TriggerConfig, BatchConfig, CooldownConfig, EnrichConfig, MCPConfig } from "./config/types.js";
 
 /**

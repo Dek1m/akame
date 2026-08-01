@@ -129,6 +129,58 @@ akame загружен (userId: akame)
 
 Полный список (17 переменных, включая `AKAME_GRANULATE_COMPACTED`, `AKAME_ENRICH_LINKS` и др.) — в [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+### Конфигурационный файл (JSON5)
+
+Альтернатива env-переменным — файл `akame.json5` с комментариями и нестрогим синтаксисом JSON.
+
+**Каскад загрузки:**
+
+```
+defaults.ts → akame.json5 → AKAME_* env
+```
+
+Env-переменные **всегда** имеют наивысший приоритет.
+
+**Поиск файла:**
+
+| Приоритет | Путь |
+|---|---|
+| 1 | `./akame.json5` (рядом с opencode.json) |
+| 2 | `~/.config/opencode/akame.json5` (глобальный) |
+
+**Пример akame.json5:**
+
+```json5
+{
+  // MCP-сервер athena-memory
+  mcpUrl: "http://athena-memory:8000/mcp/",
+  userId: "akame",
+
+  // Триггеры грануляции
+  idle: true,           // session.idle
+  compacted: true,      // session.compacted
+  toolAfter: true,      // tool.execute.after (git/Gera)
+
+  // Cooldown и лимиты
+  cooldownMs: 30000,
+  maxMessages: 50,
+
+  // Обогащение
+  enrichLinks: true,
+  enrichPrompt: true
+}
+```
+
+**Пример: конфликт приоритетов**
+
+```bash
+# В akame.json5: maxBatch = 50
+# В .env: AKAME_MAX_BATCH=20
+# Результат: 20 (env побеждает)
+```
+
+Полный список ключей, маппинг на env-переменные и подробности — в [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
 ---
 
 ## Как работает грануляция
