@@ -119,42 +119,43 @@ export const ALL_LINK_TYPES = [
 // ── CNLM-матрица: разрешённые типы связей между namespace ──
 // source namespace → target namespace → разрешённые link types
 // "*" означает все code-intrinsic типы (depends_on, used_by, extends, implements,
-// contains, contained_by, calls, called_by, related_to, references, и др.)
+// contains, contained_by, calls, called_by, related_to, и др.)
+// "references" запрещён кроме внутри code_knowledge и infrastructure → infrastructure
 export const CROSS_NAMESPACE_LINK_RULES: Record<string, Record<string, string[]>> = {
   user_facts: {
-    dialogue_insights: ["derived_from", "references"],
-    project_meta:      ["motivates", "references"],
-    code_knowledge:    ["references"],
-    infrastructure:    ["references"],
-    user_facts:        ["related_to", "contradicts", "references"],
+    dialogue_insights: ["derived_from"],
+    project_meta:      ["motivates", "informed_by"],
+    code_knowledge:    ["related_to"],
+    infrastructure:    ["related_to"],
+    user_facts:        ["related_to", "contradicts"],
   },
   dialogue_insights: {
-    user_facts:        ["derived_from", "references"],
-    project_meta:      ["informs", "references"],
-    code_knowledge:    ["references", "solves"],
-    infrastructure:    ["references"],
-    dialogue_insights: ["related_to", "contradicts", "follows", "precedes", "references"],
+    user_facts:        ["derived_from"],
+    project_meta:      ["informs", "related_to"],
+    code_knowledge:    ["solves", "motivates", "related_to"],
+    infrastructure:    ["related_to"],
+    dialogue_insights: ["related_to", "contradicts", "follows", "precedes"],
   },
   project_meta: {
-    user_facts:        ["informed_by", "references"],
-    dialogue_insights: ["informed_by", "references"],
-    code_knowledge:    ["implements_adr", "references"],
-    infrastructure:    ["references"],
-    project_meta:      ["related_to", "contradicts", "follows", "precedes", "alternative_to", "causes", "prevents", "references"],
+    user_facts:        ["informed_by", "motivates"],
+    dialogue_insights: ["informed_by"],
+    code_knowledge:    ["implements_adr", "motivates", "solves"],
+    infrastructure:    ["depends_on", "runs_on"],
+    project_meta:      ["related_to", "contradicts", "follows", "precedes", "alternative_to", "causes", "prevents"],
   },
   code_knowledge: {
-    user_facts:        ["references"],
-    dialogue_insights: ["references", "solves"],
-    project_meta:      ["implements_adr", "references"],
-    infrastructure:    ["references"],
+    user_facts:        ["related_to"],
+    dialogue_insights: ["solves", "related_to"],
+    project_meta:      ["implements_adr", "related_to"],
+    infrastructure:    ["depends_on", "runs_on"],
     code_knowledge:    ["*"], // все code-intrinsic
   },
   infrastructure: {
-    user_facts:        ["references"],
-    dialogue_insights: ["references"],
-    project_meta:      ["references"],
-    code_knowledge:    ["references"],
-    infrastructure:    ["runs_on", "contains", "contained_by", "exposes", "mounts", "depends_on", "connected_to", "references"],
+    user_facts:        ["related_to"],
+    dialogue_insights: ["related_to"],
+    project_meta:      ["depends_on", "runs_on"],
+    code_knowledge:    ["depends_on", "runs_on"],
+    infrastructure:    ["runs_on", "contains", "contained_by", "exposes", "mounts", "depends_on", "connected_to"],
   },
 };
 

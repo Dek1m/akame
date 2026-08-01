@@ -131,7 +131,7 @@ ${context.messages.map((m) => `[${m.role}]: ${m.content}`).join("\n\n")}
 Создай гранулы с:
 - namespace: "code_knowledge"
 - entity_type: "change"
-- links типа "follows" и "references" где применимо
+- links типа "follows", "depends_on", "used_by" где применимо
 
 При вызове granulate_output передай session_id="${context.sessionId}".
 Используй инструмент granulate_output для сохранения результатов.`;

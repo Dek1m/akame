@@ -25,30 +25,56 @@ const MAX_LINKS_PER_GRANULE = 5;
 const HIGH_SIMILARITY_THRESHOLD = 0.85;
 
 // ── Определение типа связи при высокой похожести ──
+// Приоритет: depends_on > solves > implements_adr > motivates > related_to > references
+// references — ТОЛЬКО для упоминаний без семантики!
 
 function determineLinkType(sourceNs: string, targetNs: string): LinkType {
+  // dialogue_insights → code_knowledge
   if (sourceNs === "dialogue_insights" && targetNs === "code_knowledge") {
     return "solves";
   }
+  // dialogue_insights → project_meta
   if (sourceNs === "dialogue_insights" && targetNs === "project_meta") {
-    return "references";
+    return "informs";
   }
+  // code_knowledge → project_meta
   if (sourceNs === "code_knowledge" && targetNs === "project_meta") {
     return "implements_adr";
   }
+  // user_facts → dialogue_insights
   if (sourceNs === "user_facts" && targetNs === "dialogue_insights") {
-    return "causes";
+    return "derived_from";
   }
+  // user_facts → project_meta
   if (sourceNs === "user_facts" && targetNs === "project_meta") {
-    return "references";
+    return "motivates";
   }
+  // project_meta → code_knowledge
   if (sourceNs === "project_meta" && targetNs === "code_knowledge") {
-    return "references";
+    return "implements_adr";
   }
+  // project_meta → user_facts
   if (sourceNs === "project_meta" && targetNs === "user_facts") {
-    return "references";
+    return "informed_by";
   }
-  return "references";
+  // project_meta → dialogue_insights
+  if (sourceNs === "project_meta" && targetNs === "dialogue_insights") {
+    return "informed_by";
+  }
+  // code_knowledge → dialogue_insights
+  if (sourceNs === "code_knowledge" && targetNs === "dialogue_insights") {
+    return "solves";
+  }
+  // infrastructure → code_knowledge
+  if (sourceNs === "infrastructure" && targetNs === "code_knowledge") {
+    return "runs_on";
+  }
+  // infrastructure → infrastructure
+  if (sourceNs === "infrastructure" && targetNs === "infrastructure") {
+    return "depends_on";
+  }
+  // fallback — related_to, НЕ references
+  return "related_to";
 }
 
 // ── Main ──
@@ -128,10 +154,18 @@ export async function enrichLinks(
 
           if (alreadyLinked) continue;
 
-          const linkType: LinkType =
-            candidate.score >= HIGH_SIMILARITY_THRESHOLD
-              ? determineLinkType(ns, targetNs)
-              : "references";
+          // Определяем тип связи по порогам confidence
+          // ≥ 0.85 → конкретный тип из determineLinkType
+          // ≥ 0.80 → related_to (умеренная связь)
+          // < 0.80 → не ставим связь (too weak)
+          let linkType: LinkType;
+          if (candidate.score >= HIGH_SIMILARITY_THRESHOLD) {
+            linkType = determineLinkType(ns, targetNs);
+          } else if (candidate.score >= 0.80) {
+            linkType = "related_to";
+          } else {
+            continue; // пропускаем слабые связи
+          }
 
           newLinks.push({
             type: linkType,
