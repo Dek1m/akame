@@ -72,7 +72,15 @@ export class SessionHandler extends BaseEventHandler {
       type: string;
       properties: Record<string, unknown>;
     };
-    switch (e.type) {
+
+    // opencode шлёт session.status с nested status.type — маппим на我们的事件
+    const effectiveType = e.type === "session.status"
+      ? `session.${(e.properties?.status as Record<string,unknown>)?.type ?? "unknown"}`
+      : e.type;
+
+    this.log.debug("session-handler: raw event", { rawType: e.type, effectiveType });
+
+    switch (effectiveType) {
       case "session.idle":
         return this.handleSessionIdle(event);
       case "session.compacted":
@@ -83,11 +91,14 @@ export class SessionHandler extends BaseEventHandler {
   }
 
   async handleSessionIdle(event: Event): Promise<void> {
-    if (!this.config.granulateIdle) return;
+    if (!this.config.granulateIdle) {
+      this.log.debug('session.idle: granulateIdle=false, skip', {});
+      return;
+    }
 
     const eventData = event as unknown as {
-      type: "session.idle";
-      properties: { sessionID: string; location?: { directory?: string } };
+      type: "session.idle" | "session.status";
+      properties: { sessionID: string; location?: { directory?: string }; status?: { type?: string } };
     };
     const sessionId = eventData.properties?.sessionID;
     if (!sessionId) return;
@@ -119,6 +130,7 @@ export class SessionHandler extends BaseEventHandler {
         path: { id: sessionId },
       });
       const messages: MessageInfo[] = messagesResult.data ?? [];
+      this.log.debug('session.idle: messages fetched', { count: messages.length, sessionId });
       if (messages.length === 0) {
         this.log.info('session.idle: нет сообщений', { sessionId, eventType: 'idle' });
         return;
@@ -168,12 +180,13 @@ export class SessionHandler extends BaseEventHandler {
         participants
       );
 
+      this.log.debug('session.idle: calling batchOrDirect', { batchProcessor: !!this.batchProcessor, engine: !!this.granulationEngine, sessionId });
       await this.batchOrDirect(context, { sessionId, event: "idle", enqueuedAt: Date.now() });
       if (!this.batchProcessor) {
         this.cooldown.markSessionGranulated(sessionId);
       }
     } catch (err) {
-      this.log.error('session.idle ошибка', { sessionId, eventType: 'idle', error: err instanceof Error ? err.message : String(err) });
+      this.log.error('session.idle ошибка', { sessionId, eventType: 'idle', error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack?.split('\n').slice(0,3).join(' | ') : undefined });
     }
   }
 

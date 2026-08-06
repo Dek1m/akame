@@ -30,9 +30,9 @@ export class BatchAccumulator {
   private flushing: boolean = false;
   private disposed: boolean = false;
 
-  // Периодическая проверка очереди (каждые 60 сек)
-  private static readonly PERIODIC_FLUSH_INTERVAL_MS = 60_000;
-  private periodicFlushTimer: ReturnType<typeof setInterval> | null = null;
+  // Периодическая проверка очереди — ОТКЛЮЧЕНА (flush только по batchSize и maxAge)
+  // private static readonly PERIODIC_FLUSH_INTERVAL_MS = 60_000;
+  // private periodicFlushTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private config: AkameConfig,
@@ -42,13 +42,7 @@ export class BatchAccumulator {
     // Фоновая очистка recentlyFlushed раз в 30 сек
     this.flushTimerRecentlies = setInterval(() => this._cleanRecentlies(), this.RECENTLY_TTL);
 
-    // Периодический flush: сбрасывает накопленное раз в 60 сек
-    this.periodicFlushTimer = setInterval(() => {
-      if (this.queue.length > 0 && !this.flushing) {
-        this.log.debug("batch: periodic flush", { queueSize: this.queue.length });
-        this.doFlush();
-      }
-    }, BatchAccumulator.PERIODIC_FLUSH_INTERVAL_MS);
+    // Периодический flush ОТКЛЮЧЁН — flush только по batchSize и maxAge
   }
 
   private _isRecentlyFlushed(sessionId: string): boolean {
@@ -93,7 +87,7 @@ export class BatchAccumulator {
 
     // Уже гранулировано недавно (с TTL 30 сек)
     if (this._isRecentlyFlushed(entry.sessionId)) {
-      this.log.debug('batch: skip', { sessionId: entry.sessionId, eventType: 'batch', reason: 'recently flushed' });
+      this.log.info('batch: skip', { sessionId: entry.sessionId, eventType: 'batch', reason: 'recently flushed' });
       return;
     }
 
@@ -127,6 +121,7 @@ export class BatchAccumulator {
 
       this.queue.push(pending);
       this.queuedMap.set(entry.sessionId, pending);
+      this.log.debug('batch: enqueued', { sessionId: entry.sessionId, queueSize: this.queue.length, batchSize: this.config.batchSize });
 
       if (this.queue.length >= this.config.batchSize) {
         this.doFlush();
@@ -156,10 +151,7 @@ export class BatchAccumulator {
       clearInterval(this.flushTimerRecentlies);
       this.flushTimerRecentlies = null;
     }
-    if (this.periodicFlushTimer !== null) {
-      clearInterval(this.periodicFlushTimer);
-      this.periodicFlushTimer = null;
-    }
+    // periodicFlushTimer — removed (no periodic flush)
 
     const err = new Error('BatchAccumulator disposed');
     for (const entry of this.queue) {

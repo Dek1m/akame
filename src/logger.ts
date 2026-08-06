@@ -85,6 +85,9 @@ export class Logger {
     const merged = { ...this.context, ...ctx };
     const line = formatMessage(level, msg, Object.keys(merged).length > 0 ? merged : undefined);
 
+    // Вывод в stderr для docker logs visibility
+    console.error(line);
+
     this.client.app
       .log({
         body: {
