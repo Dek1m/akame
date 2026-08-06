@@ -304,7 +304,11 @@ export class MCPClient {
             `MCP error: ${(err.message as string) ?? JSON.stringify(err)}`,
           );
         }
-        return parsed.result;
+        // Извлекаем content[0].text аналогично SSE-пути
+        const rpcResult = parsed.result as Record<string, unknown> | undefined;
+        const rpcContent = rpcResult?.content as Array<Record<string, unknown>> | undefined;
+        const rpcText = rpcContent?.[0]?.text;
+        return typeof rpcText === "string" ? JSON.parse(rpcText) : rpcResult;
       } finally {
         clearTimeout(timer);
       }
