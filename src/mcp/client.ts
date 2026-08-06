@@ -26,6 +26,9 @@ export interface IngestBatchResult {
   skipped: number;
   updated: number;
   total: number;
+  // MCP actual response: { summary: { insert, skip, update }, results: [...] }
+  summary?: { insert: number; skip: number; update: number };
+  results?: Array<{ id: string; action: string; namespace: string }>;
 }
 
 export interface MemoryRecord {
@@ -95,10 +98,21 @@ export class MCPClient {
     entries: GranuleEntry[],
     userId: string
   ): Promise<IngestBatchResult> {
-    return this.call("memory_ingest_batch", {
+    const raw = await this.call("memory_ingest_batch", {
       entries,
       user_id: userId,
-    }, false) as Promise<IngestBatchResult>;
+    }, false) as any;
+    // Нормализация: MCP возвращает { summary: { insert, skip, update } }
+    // Маппим в { inserted, skipped, updated, total }
+    const summary = raw?.summary;
+    if (summary && typeof summary.insert === "number") {
+      const inserted = summary.insert;
+      const skipped = summary.skip ?? 0;
+      const updated = summary.update ?? 0;
+      return { inserted, skipped, updated, total: inserted + skipped + updated, summary, results: raw?.results };
+    }
+    // Fallback: уже в старом формате
+    return raw as IngestBatchResult;
   }
 
   async store(
