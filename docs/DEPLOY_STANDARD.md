@@ -335,7 +335,7 @@ ssh svc_athene_ai@ai.atom.ui "docker logs opencode --tail=20"
 # akame загружен (userId: akame)
 ```
 
-### 8.2 Проверка athena-memory
+### 8.2 Проверка selti
 
 ```bash
 # Health check MCP-сервера
@@ -389,7 +389,7 @@ curl -s http://localhost:8000/healthz
 | Проблема | Решение |
 |---|---|
 | `akame не загружен` в логах | Проверить путь в `opencode.json` → `source` |
-| `MCP timeout` | Проверить доступность `athena-memory` (`curl localhost:8000/healthz`) |
+| `MCP timeout` | Проверить доступность `selti` (`curl localhost:8000/healthz`) |
 | `permission denied` для tools | Проверить `opencode.json` → `permission` секция |
 | `tsc` ошибки после pull | `rm -rf dist && npm run build` |
 | Контейнер не стартует | `docker logs opencode` — смотреть ошибки |

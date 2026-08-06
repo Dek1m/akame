@@ -2,7 +2,7 @@ name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'src/**'
       - 'package.json'
@@ -108,7 +108,7 @@ jobs:
     needs: build
     if: |
       github.event_name == 'push' && 
-      github.ref == 'refs/heads/main' &&
+      github.ref == 'refs/heads/master' &&
       inputs.dry_run != 'true'
     environment:
       name: production

@@ -1,7 +1,7 @@
 # Akame — OpenCode Plugin for Memory Granulation
 
 > **Akame** — opencode-плагин на TypeScript для автоматической грануляции диалогов и кода
-> в athena-memory. Реагирует на события opencode, анализирует контекст через LLM
+> в selti. Реагирует на события opencode, анализирует контекст через LLM
 > с промптом агента **Тишь** (memory-granulator) и сохраняет структурированные гранулы
 > в семантическую память.
 
@@ -17,7 +17,7 @@
 | **Runtime** | Bun (встроен в opencode) |
 | **Модель Тиши** | `opencode-go/deepseek-v4-flash` |
 | **Тесты** | 88 тестов, 8 файлов — все зелёные |
-| **Гранулы athena-memory** | 702 (code_knowledge: 408, project_meta: 162, dialogue_insights: 78, user_facts: 54, infrastructure: 0) |
+| **Гранулы selti** | 702 (code_knowledge: 408, project_meta: 162, dialogue_insights: 78, user_facts: 54, infrastructure: 0) |
 | **Cross-namespace связи** | 137 |
 | **Сироты** | 400 (56.9%) |
 | **Связность по namespace** | code_knowledge 48%, dialogue_insights 44%, project_meta 35%, user_facts 30% → 72% (после ретроспективной линковки) |
@@ -69,7 +69,7 @@
                                                  │ JSON-RPC over HTTP
                                                  ▼
                               ┌──────────────────────────────────────┐
-                              │  athena-memory (selti) :8000         │
+                              │  selti (selti) :8000         │
                               │  memory_ingest_batch                  │
                               │  PostgreSQL + pgvector + Redis       │
                               └──────────────────────────────────────┘
@@ -85,15 +85,15 @@
 | **fetchRelevantGranules** | Обогащение промпта Тиши релевантными гранулами из других namespace (Tier 2 auto-linker) |
 | **code-index.ts** | Сканер: извлекает классы/функции/интерфейсы из TS/Python файлов, создаёт code_knowledge гранулы |
 | **git-diff.ts** | Получение реального git diff для грануляции изменений кода |
-| **MCPClient.ts** | HTTP-клиент к athena-memory: JSON-RPC, retry с exponential backoff |
+| **MCPClient.ts** | HTTP-клиент к selti: JSON-RPC, retry с exponential backoff |
 
 ---
 
 ## Выполненные фазы
 
-### Фаза 0 — Документация opencode в athena-memory [x]
+### Фаза 0 — Документация opencode в selti [x]
 
-- [x] 0.1 Загружены 9 страниц официальной документации opencode в athena-memory
+- [x] 0.1 Загружены 9 страниц официальной документации opencode в selti
 - [x] 0.2 `/docs/plugins/`, `/docs/sdk/`, `/docs/tools/`, `/docs/permissions/`, `/docs/agents/`, `/docs/custom-tools/`, `/docs/config/`
 
 **Результат:** полное понимание Plugin API, встроенной permission system, событий и хуков.
@@ -197,7 +197,7 @@
 
 - [x] 12.1 Namespace `infrastructure` в `schema.ts` (entity_type: server, container, service, api, network, volume, os)
 - [x] 12.2 10 инфраструктурных гранул о `ai.atom.ui` (сервер, контейнеры, сети, API)
-- [x] 12.3 Временно сохранены в `project_meta` — namespace `infrastructure` не зарегистрирован в backend athena-memory
+- [x] 12.3 Временно сохранены в `project_meta` — namespace `infrastructure` не зарегистрирован в backend selti
 - [x] 12.4 CNLM-матрица расширена до 5 namespace (включая infrastructure)
 
 ---
@@ -338,7 +338,7 @@ akame/
 │   │                                    #   автосвязывание через CNLM (threshold ≥0.75)
 │   │
 │   ├── mcp/
-│   │   └── client.ts                    # MCPClient — HTTP JSON-RPC к athena-memory.
+│   │   └── client.ts                    # MCPClient — HTTP JSON-RPC к selti.
 │   │                                    #   Методы: memory_search, memory_ingest_batch и др.
 │   │                                    #   Retry с exponential backoff (500ms→1s→2s).
 │   │
@@ -388,7 +388,7 @@ akame/
 
 ---
 
-## 5 Namespace в athena-memory
+## 5 Namespace в selti
 
 | Namespace | Гранул | Связность | Назначение |
 |---|---|---|---|
@@ -434,7 +434,7 @@ CNLM-валидация в `validateGranules()` — неблокирующая (
 - **Реактивный подход** — без polling, только события opencode
 - **LLM через SDK** — `client.session.prompt()` с `format: json_schema`
 - **Fire-and-forget** — все операции асинхронные, не блокируют opencode
-- **HTTP MCP** — прямая отправка гранул в athena-memory через JSON-RPC
+- **HTTP MCP** — прямая отправка гранул в selti через JSON-RPC
 - **Permission delegation** — двухуровневая: opencode.json + in-code `context.agent`
 - **Three-tier auto-linker** — Schema (CNLM) → Prompt (fetchRelevantGranules) → Post-process (enrichLinks)
 - **Global cooldown** — 5 сек между любыми грануляциями, предотвращает лавину

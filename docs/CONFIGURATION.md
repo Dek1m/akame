@@ -8,7 +8,7 @@
 
 | Переменная | Тип | Дефолт | Описание |
 |---|---|---|---|
-| `AKAME_MCP_URL` | string | `http://athena-memory:8000/mcp/` | URL MCP-эндпоинта athena-memory |
+| `AKAME_MCP_URL` | string | `http://selti:8000/mcp/` | URL MCP-эндпоинта selti |
 | `AKAME_API_KEY` | string | — | API-ключ для авторизации (Bearer token) |
 | `AKAME_USER_ID` | string | `akame` | Владелец записей в памяти |
 | `AKAME_GRANULATE_IDLE` | boolean | `true` | Гранулировать при `session.idle` |
@@ -31,8 +31,8 @@
 ## Пример .env файла
 
 ```env
-# ── Подключение к athena-memory ──
-AKAME_MCP_URL=http://athena-memory:8000/mcp/
+# ── Подключение к selti ──
+AKAME_MCP_URL=http://selti:8000/mcp/
 AKAME_API_KEY=sk-athena-your-key-here
 
 # ── Идентификатор владельца ──
@@ -91,7 +91,7 @@ AKAME_ENRICH_PROMPT=true
       "source": ".opencode/plugins/akame",
       "enabled": true,
       "env": {
-        "AKAME_MCP_URL": "http://athena-memory:8000/mcp/",
+        "AKAME_MCP_URL": "http://selti:8000/mcp/",
         "AKAME_API_KEY": "sk-athena-your-key",
         "AKAME_USER_ID": "akame"
       }
@@ -109,7 +109,7 @@ AKAME_ENRICH_PROMPT=true
       "source": ".opencode/plugins/akame",
       "enabled": true,
       "env": {
-        "AKAME_MCP_URL": "http://athena-memory:8000/mcp/",
+        "AKAME_MCP_URL": "http://selti:8000/mcp/",
         "AKAME_API_KEY": "sk-athena-your-key",
         "AKAME_USER_ID": "akame",
         "AKAME_GRANULATE_IDLE": "true",
@@ -140,14 +140,14 @@ AKAME_ENRICH_PROMPT=true
 
 #### AKAME_MCP_URL
 
-URL-адрес MCP-эндпоинта athena-memory. Все запросы идут через HTTP POST на этот адрес.
+URL-адрес MCP-эндпоинта selti. Все запросы идут через HTTP POST на этот адрес.
 
 ```env
 # Локально
 AKAME_MCP_URL=http://localhost:8000/mcp/
 
 # В Docker (ссылка на сервис)
-AKAME_MCP_URL=http://athena-memory:8000/mcp/
+AKAME_MCP_URL=http://selti:8000/mcp/
 
 # С внешним доменом
 AKAME_MCP_URL=https://memory.example.com/mcp/
@@ -155,7 +155,7 @@ AKAME_MCP_URL=https://memory.example.com/mcp/
 
 #### AKAME_API_KEY
 
-API-ключ для авторизации. Если athena-memory требует авторизацию, передаётся как `Bearer` токен в заголовке `Authorization`.
+API-ключ для авторизации. Если selti требует авторизацию, передаётся как `Bearer` токен в заголовке `Authorization`.
 
 ```env
 # С авторизацией
@@ -167,7 +167,7 @@ AKAME_API_KEY=sk-athena-production-key
 
 #### AKAME_USER_ID
 
-Идентификатор владельца записей в athena-memory. Все гранулы привязываются к этому пользователю.
+Идентификатор владельца записей в selti. Все гранулы привязываются к этому пользователю.
 
 ```env
 # Дефолт
@@ -344,7 +344,7 @@ AKAME_ENRICH_PROMPT=true
 ### Команда (Docker)
 
 ```env
-AKAME_MCP_URL=http://athena-memory:8000/mcp/
+AKAME_MCP_URL=http://selti:8000/mcp/
 AKAME_API_KEY=sk-team-shared-key
 AKAME_USER_ID=akame
 AKAME_GRANULATE_IDLE=true
@@ -400,8 +400,8 @@ defaults.ts → akame.json5 → AKAME_* env
 
 ```json5
 {
-  // ── MCP-сервер athena-memory ──
-  mcpUrl: "http://athena-memory:8000/mcp/",
+  // ── MCP-сервер selti ──
+  mcpUrl: "http://selti:8000/mcp/",
   apiKey: "sk-athena-your-key",   // опционально
   userId: "akame",
 

@@ -1,4 +1,4 @@
-// ── Namespace-ы athena-memory ──
+// ── Namespace-ы selti ──
 // Дефолтные namespace для fallback. Динамический список загружается из реестра.
 export const NAMESPACE_USER_FACTS = "user_facts" as const;
 export const NAMESPACE_PROJECT_META = "project_meta" as const;

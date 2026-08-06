@@ -146,7 +146,7 @@ export class PluginManager {
         if (!output.prompt) {
           output.context.push(
             "## Akame Plugin\n" +
-            "Сессия гранулируется плагином akame в athena-memory.\n" +
+            "Сессия гранулируется плагином akame в selti.\n" +
             "Сохраняются: архитектурные решения, инсайты диалогов, code_knowledge, user_facts."
           );
         }

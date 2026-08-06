@@ -44,7 +44,7 @@
                                                                |
                                                                v
                                                    +--------------------------+
-                                                   | athena-memory            |
+                                                   | selti            |
                                                    | PostgreSQL +             |
                                                    | pgvector + Redis         |
                                                    +--------------------------+
@@ -107,7 +107,7 @@ function loadConfig(env?: Record<string, string | undefined>): AkameConfig
 
 Определяет:
 
-- **Namespace-ы** athena-memory: `user_facts`, `project_meta`, `dialogue_insights`, `code_knowledge`
+- **Namespace-ы** selti: `user_facts`, `project_meta`, `dialogue_insights`, `code_knowledge`
 - **Дефолты** конфигурации (MCP_URL, USER_ID, таймауты, лимиты)
 - **Интерфейс** `AkameConfig` — полная типизация конфигурации
 
@@ -131,11 +131,11 @@ log.error("MCP ошибка: connection refused");
 
 ---
 
-### 5. mcp/client.ts — HTTP-клиент athena-memory
+### 5. mcp/client.ts — HTTP-клиент selti
 
 **Файл:** `src/mcp/client.ts`
 
-Класс `MCPClient` — обёртка над HTTP POST для вызова методов athena-memory через JSON-RPC 2.0.
+Класс `MCPClient` — обёртка над HTTP POST для вызова методов selti через JSON-RPC 2.0.
 
 **Протокол:**
 
@@ -231,7 +231,7 @@ interface GranulatorOutput {
 
 **Файл:** `src/granulator/engine.ts`
 
-Центральная функция `granulate()` — координирует процесс, но **не занимается отправкой в athena-memory**. Эту работу выполняет кастомный tool `granulate_output`.
+Центральная функция `granulate()` — координирует процесс, но **не занимается отправкой в selti**. Эту работу выполняет кастомный tool `granulate_output`.
 
 **Входные данные (GranulateContext):**
 
@@ -252,7 +252,7 @@ interface GranulateContext {
 3. Формирование payload: system prompt + данные диалога
 4. Вызов LLM через `client.session.prompt()` с агентом `memory-granulator`
 5. LLM анализирует диалог и вызывает кастомный tool `granulate_output` с аргументами
-6. Tool валидирует, отправляет в athena-memory, возвращает результат
+6. Tool валидирует, отправляет в selti, возвращает результат
 7. Служебная сессия удаляется
 
 **Что НЕ делает engine:**
@@ -317,7 +317,7 @@ export function createGranulateTool(config: AkameConfig, log: Logger) {
 1. **Извлечение контекста:** `context.sessionID` из opencode, данные сессии из session-store
 2. **Формирование полноценного объекта GranulatorOutput:** аргументы LLM + метаданные из контекста
 3. **Валидация:** вызов `validateGranules()` из `schema.ts` — проверяет структуру, типы, обязательные поля
-4. **Отправка в athena-memory:** через `MCPClient.ingestBatch()` с батчированием (по `config.maxBatch` штук)
+4. **Отправка в selti:** через `MCPClient.ingestBatch()` с батчированием (по `config.maxBatch` штук)
 5. **Возврат результата:** строка с количеством гранул и summary
 
 **Session-store:**
@@ -456,7 +456,7 @@ const result = await client.session.prompt({
 ### Обработка ответа
 
 1. LLM анализирует диалог и вызывает tool `granulate_output`
-2. Tool валидирует аргументы, формирует GranuleMetadata, шлёт в athena-memory
+2. Tool валидирует аргументы, формирует GranuleMetadata, шлёт в selti
 3. Engine получает текстовый ответ от tool (не JSON для парсинга)
 4. Служебная сессия удаляется
 
@@ -468,7 +468,7 @@ MCP-клиент используется **только внутри касто
 
 ### Протокол
 
-Все запросы к athena-memory идут через HTTP POST на `AKAME_MCP_URL` в формате JSON-RPC 2.0:
+Все запросы к selti идут через HTTP POST на `AKAME_MCP_URL` в формате JSON-RPC 2.0:
 
 ```json
 {
@@ -627,7 +627,7 @@ interface ScanResult {
 
 **Файл:** `src/tools/code-index-tool.ts`
 
-Сканирует проект и создаёт code_knowledge гранулы в athena-memory. Извлекает классы, интерфейсы, функции, типы и enum-ы из TypeScript и Python файлов. Создаёт модульные и сущностные гранулы со связями.
+Сканирует проект и создаёт code_knowledge гранулы в selti. Извлекает классы, интерфейсы, функции, типы и enum-ы из TypeScript и Python файлов. Создаёт модульные и сущностные гранулы со связями.
 
 **Аргументы:**
 
@@ -950,7 +950,7 @@ function resolveSafePath(inputDir: string, workspaceDir: string): string
 | Cooldown не прошёл | Тихий выход |
 | LLM не вызвал tool `granulate_output` | Error-лог, выход (engine получит пустой или текстовый ответ) |
 | Tool получил невалидные аргументы | Tool выбрасывает ошибку, LLM может попробовать снова |
-| athena-memory недоступна | Error-лог, выход (tool ловит ошибку) |
+| selti недоступна | Error-лог, выход (tool ловит ошибку) |
 | Неподдерживаемое расширение файла | Тихий выход |
 | Ошибка чтения промпта | Error-лог, выход |
 | Данные сессии истекли в session-store (TTL 10 мин) | Tool создаёт гранулы без message_ids, но сохраняет

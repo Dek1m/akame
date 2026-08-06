@@ -100,11 +100,11 @@ services:
     volumes:
       - ./dist:/home/opencode/.config/opencode/plugins/akame/dist:ro
     depends_on:
-      athena-memory:
+      selti:
         condition: service_healthy
 
-  athena-memory:
-    image: ghcr.io/selti-project/athena-memory:latest
+  selti:
+    image: ghcr.io/selti-project/selti:latest
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,7 +125,7 @@ services:
 | Profile | Сервисы | Назначение |
 |---------|---------|------------|
 | `build` | akame | Сборка плагина |
-| `dev` | opencode, athena-memory, postgres, redis | Локальная разработка |
+| `dev` | opencode, selti, postgres, redis | Локальная разработка |
 
 ```bash
 # Сборка
@@ -245,7 +245,7 @@ gh workflow run deploy.yml -f rollback_tag=v0.10.0
 
 | Переменная | Дефолт | Описание |
 |------------|--------|----------|
-| `AKAME_MCP_URL` | `http://athena-memory:8000/mcp/` | URL athena-memory |
+| `AKAME_MCP_URL` | `http://selti:8000/mcp/` | URL selti |
 | `AKAME_USER_ID` | `akame` | Владелец записей |
 | `AKAME_COOLDOWN_MS` | `30000` | Cooldown (мс) |
 

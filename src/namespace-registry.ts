@@ -1,4 +1,4 @@
-// ── NamespaceRegistry — динамическая загрузка namespace из athena-memory ──
+// ── NamespaceRegistry — динамическая загрузка namespace из selti ──
 // Загружает список namespace из MCP сервера и кэширует в памяти.
 // Используется вместо хардкода в constants.ts.
 

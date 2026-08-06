@@ -40,7 +40,7 @@ export function createGranulateTool(
 ) {
   return tool({
     description:
-      "[ТОЛЬКО ДЛЯ memory-granulator] Сохранить результаты анализа диалога в athena-memory. " +
+      "[ТОЛЬКО ДЛЯ memory-granulator] Сохранить результаты анализа диалога в selti. " +
       "Вызов этого инструмента разрешён только агенту memory-granulator (Тишь). " +
       "Передай summary (о чём диалог) и массив извлечённых гранул знаний. " +
       "Для code_knowledge указывай entity_type, module_path, entity_name, signature. " +
@@ -68,7 +68,7 @@ export function createGranulateTool(
               ),
             namespace: tool.schema
               .string()
-              .describe("Namespace гранулы (любой из реестра athena-memory)"),
+              .describe("Namespace гранулы (любой из реестра selti)"),
             importance: tool.schema
               .number()
               .int()
@@ -154,7 +154,7 @@ export function createGranulateTool(
       // ── Защита: ТОЛЬКО memory-granulator может писать в память ──
       const caller = context.agent || "unknown";
       if (caller !== "memory-granulator") {
-        const errMsg = `Доступ запрещён: агент "${caller}" не имеет права вызывать granulate_output. Только memory-granulator (Тишь) может писать в athena-memory.`;
+        const errMsg = `Доступ запрещён: агент "${caller}" не имеет права вызывать granulate_output. Только memory-granulator (Тишь) может писать в selti.`;
         log.warn(errMsg, { caller });
         throw new Error(errMsg);
       }
@@ -200,7 +200,7 @@ export function createGranulateTool(
       const validated = validateGranules(granulesInput, log);
       log.debug('Валидация пройдена', { granuleCount: validated.granules.length });
 
-      // Отправка в athena-memory
+      // Отправка в selti
       const entries = validated.granules.map((g) => ({
         content: g.content,
         namespace: g.namespace,

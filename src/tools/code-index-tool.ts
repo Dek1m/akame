@@ -1,4 +1,4 @@
-// ── Tool: code_index — сканирование проекта и индексация кода в athena-memory ──
+// ── Tool: code_index — сканирование проекта и индексация кода в selti ──
 
 import { tool } from "@opencode-ai/plugin";
 import { MCPClient } from "../mcp/client.js";
@@ -11,7 +11,7 @@ import { resolveSafePath } from "../security/validate.js";
 export function createCodeIndexTool(config: AkameConfig, log: Logger, workspaceDir: string, mcp: MCPClient) {
   return tool({
     description:
-      "Scan project files and create code knowledge granules in athena-memory. " +
+      "Scan project files and create code knowledge granules in selti. " +
       "Extracts classes, interfaces, functions, types, and enums from TypeScript and Python files. " +
       "Creates module-level and entity-level granules with dependency links.",
 

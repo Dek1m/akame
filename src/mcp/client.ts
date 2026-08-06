@@ -1,4 +1,4 @@
-// ── MCP HTTP клиент для athena-memory ──
+// ── MCP HTTP клиент для selti ──
 // JSON-RPC 2.0 over HTTP POST
 // Все методы: store, ingestBatch, search, get, update, delete, list, forget, stats, findSimilar
 

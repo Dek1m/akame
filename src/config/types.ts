@@ -47,11 +47,11 @@ export interface EnrichConfig {
 }
 
 export interface MCPConfig {
-  /** URL athena-memory MCP сервера */
+  /** URL selti MCP сервера */
   readonly url: string;
   /** API-ключ (опционально) */
   readonly apiKey?: string;
-  /** ID пользователя в athena-memory */
+  /** ID пользователя в selti */
   readonly userId: string;
 }
 
@@ -68,7 +68,7 @@ export interface MCPConfig {
  * @example
  * ```json5
  * {
- *   mcpUrl: "http://athena-memory:8000/mcp/",
+ *   mcpUrl: "http://selti:8000/mcp/",
  *   userId: "akame",
  *   idle: true,
  *   cooldownMs: 30000
@@ -77,11 +77,11 @@ export interface MCPConfig {
  */
 export interface AkameFileConfig {
   // MCP
-  /** URL athena-memory MCP сервера (@see AKAME_MCP_URL) */
+  /** URL selti MCP сервера (@see AKAME_MCP_URL) */
   mcpUrl?: string;
   /** API-ключ для авторизации (@see AKAME_API_KEY) */
   apiKey?: string;
-  /** ID пользователя в athena-memory (@see AKAME_USER_ID) */
+  /** ID пользователя в selti (@see AKAME_USER_ID) */
   userId?: string;
 
   // Триггеры

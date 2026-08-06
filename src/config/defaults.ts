@@ -1,7 +1,7 @@
 // ── Дефолты конфигурации ──
 
 export const DEFAULTS = {
-  MCP_URL: "http://athena-memory:8000/mcp/",
+  MCP_URL: "http://selti:8000/mcp/",
   USER_ID: "akame",
 
   // Триггеры

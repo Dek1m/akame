@@ -44,7 +44,7 @@ describe("handleToolExecuteAfter", () => {
     expect(log.info).toHaveBeenCalled();
   });
 
-  it("обрабатывает memory_search (MCP athena-memory)", async () => {
+  it("обрабатывает memory_search (MCP selti)", async () => {
     await handleToolExecuteAfter(input, { tool: "memory_search", args: { query: "test" }, sessionID: "s1" }, { result: "[]", isMcpResult: true }, makeConfig(), log);
     expect(log.info).toHaveBeenCalled();
   });

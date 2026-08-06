@@ -1,8 +1,8 @@
 # akame
 
-> opencode-плагин для автоматической грануляции диалогов и кода в семантическую память athena-memory
+> opencode-плагин для автоматической грануляции диалогов и кода в семантическую память selti
 
-**akame** — это плагин для [opencode](https://opencode.ai), который превращает ваши диалоги, код и архитектурные решения в структурированные знания. Он реагирует на события opencode, анализирует контекст через LLM с агентом **memory-granulator (Тишь)**, и та через кастомный tool `granulate_output` сохраняет гранулы — самодостаточные описания фактов — в семантическую память [athena-memory](https://github.com/selti-project/athena-memory).
+**akame** — это плагин для [opencode](https://opencode.ai), который превращает ваши диалоги, код и архитектурные решения в структурированные знания. Он реагирует на события opencode, анализирует контекст через LLM с агентом **memory-granulator (Тишь)**, и та через кастомный tool `granulate_output` сохраняет гранулы — самодостаточные описания фактов — в семантическую память [selti](https://github.com/selti-project/selti).
 
 Плагин работает незаметно: не блокирует opencode, не требует ручного запуска и автоматически извлекает суть из каждого диалога, каждого изменения файла и каждой git-команды.
 
@@ -54,7 +54,7 @@
                                       JSON-RPC over HTTP POST
                                                  v
                              +-------------------------------------+
-                             |  athena-memory (selti) :8000        |
+                             |  selti (selti) :8000        |
                              |  PostgreSQL + pgvector + Redis      |
                              +-------------------------------------+
 ```
@@ -84,7 +84,7 @@ npm run build
 Создайте файл `.env` в корне проекта (см. `.env.example`):
 
 ```env
-AKAME_MCP_URL=http://athena-memory:8000/mcp/
+AKAME_MCP_URL=http://selti:8000/mcp/
 AKAME_API_KEY=
 AKAME_USER_ID=akame
 ```
@@ -116,7 +116,7 @@ akame загружен (userId: akame)
 
 | Переменная | Дефолт | Описание |
 |---|---|---|
-| `AKAME_MCP_URL` | `http://athena-memory:8000/mcp/` | URL MCP-эндпоинта athena-memory |
+| `AKAME_MCP_URL` | `http://selti:8000/mcp/` | URL MCP-эндпоинта selti |
 | `AKAME_API_KEY` | — | API-ключ для авторизации (Bearer token) |
 | `AKAME_USER_ID` | `akame` | Владелец записей в памяти |
 | `AKAME_GRANULATE_IDLE` | `true` | Гранулировать при `session.idle` |
@@ -152,8 +152,8 @@ Env-переменные **всегда** имеют наивысший прио
 
 ```json5
 {
-  // MCP-сервер athena-memory
-  mcpUrl: "http://athena-memory:8000/mcp/",
+  // MCP-сервер selti
+  mcpUrl: "http://selti:8000/mcp/",
   userId: "akame",
 
   // Триггеры грануляции
@@ -210,7 +210,7 @@ akame регистрирует 7 кастомных инструментов д�
 
 | Tool | Файл | Назначение |
 |---|---|---|
-| `granulate_output` | `src/granulator/granulate-tool.ts` | Сохранение гранул в athena-memory: валидация → батчинг → MCP |
+| `granulate_output` | `src/granulator/granulate-tool.ts` | Сохранение гранул в selti: валидация → батчинг → MCP |
 | `code_index` | `src/tools/code-index-tool.ts` | Сканирование `.ts`/`.py` файлов и создание `code_knowledge` гранул |
 | `code_diff` | `src/tools/code-diff-tool.ts` | Анализ unified diff → гранулы code_knowledge (added/modified/removed) |
 | `code_graph` | `src/tools/code-graph-tool.ts` | Построение графа зависимостей, поиск сирот, циклов, обратных связей |
@@ -218,13 +218,13 @@ akame регистрирует 7 кастомных инструментов д�
 | `migrate_legacy_granules` | `src/tools/migrate-legacy-granules-tool.ts` | Миграция старых гранул в новый формат (извлечение entity_type/name) |
 | `graph_health` | `src/tools/graph-health-tool.ts` | Проверка здоровья графа: связность, дубликаты, cross-ns связи |
 
-Все тулы (кроме `granulate_output`) работают через `MCPClient`: поиск существующих гранул → дедупликация → создание/обновление записей в athena-memory.
+Все тулы (кроме `granulate_output`) работают через `MCPClient`: поиск существующих гранул → дедупликация → создание/обновление записей в selti.
 
 Подробнее о каждом инструменте — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## Namespace-ы athena-memory
+## Namespace-ы selti
 
 | Namespace | Назначение | Пример |
 |---|---|---|
@@ -232,7 +232,7 @@ akame регистрирует 7 кастомных инструментов д�
 | `project_meta` | Архитектурные решения, ADR | «Принято решение использовать JWT вместо cookie-сессий» |
 | `dialogue_insights` | Инсайты из диалогов | «Выяснено: проект требует горизонтального масштабирования» |
 | `code_knowledge` | Знания из кода | «В `auth.middleware.ts` реализована проверка JWT» |
-| `infrastructure` | Инфраструктурные факты | «athena-memory работает на порту 8000 в Docker» |
+| `infrastructure` | Инфраструктурные факты | «selti работает на порту 8000 в Docker» |
 
 ---
 
@@ -245,7 +245,7 @@ akame регистрирует 7 кастомных инструментов д�
 | Plugin API | `@opencode-ai/plugin` v1 |
 | SDK | `@opencode-ai/sdk` |
 | Тесты | Vitest |
-| Память | athena-memory (PostgreSQL + pgvector) |
+| Память | selti (PostgreSQL + pgvector) |
 | Протокол | JSON-RPC 2.0 over HTTP |
 
 ---
@@ -260,13 +260,13 @@ akame/
 │   ├── constants.ts                    # Namespace-ы, дефолты, типы конфигурации
 │   ├── logger.ts                       # Асинхронный логгер через client.app.log
 │   ├── mcp/
-│   │   └── client.ts                   # HTTP-клиент athena-memory (JSON-RPC 2.0)
+│   │   └── client.ts                   # HTTP-клиент selti (JSON-RPC 2.0)
 │   ├── scanner/
 │   │   └── code-index.ts               # Regex-парсеры .ts/.py → классы, функции, типы
 │   ├── granulator/
 │   │   ├── schema.ts                   # JSON Schema + типы + валидация гранул
 │   │   ├── engine.ts                   # Ядро: сбор контекста → LLM (memory-granulator)
-│   │   ├── granulate-tool.ts           # Tool: валидация → MCP → athena-memory
+│   │   ├── granulate-tool.ts           # Tool: валидация → MCP → selti
 │   │   └── link-enricher.ts            # Пост-обработка: автосвязи между гранулами
 │   ├── tools/
 │   │   ├── code-index-tool.ts          # Tool: code_index

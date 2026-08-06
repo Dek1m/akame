@@ -23,7 +23,7 @@ const GRANULATABLE_TOOL_SUFFIXES = [
   "todowrite",
   // Планировщик (ino)
   "ino_create", "ino_update", "ino_delete", "ino_list", "ino_logs", "ino_get",
-  // MCP-тулы athena-memory (read-only — пишет только Тишь)
+  // MCP-тулы selti (read-only — пишет только Тишь)
   "memory_search", "memory_recent", "memory_get", "memory_list",
   "memory_stats", "memory_find_similar", "memory_get_relations",
   "memory_traverse", "memory_graph_stats", "memory_namespaces", "memory_version",

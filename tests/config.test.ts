@@ -34,7 +34,7 @@ describe("loadConfig (legacy)", () => {
 
   it("возвращает дефолты при пустом env", () => {
     const config = loadConfig({});
-    expect(config.mcpUrl).toBe("http://athena-memory:8000/mcp/");
+    expect(config.mcpUrl).toBe("http://selti:8000/mcp/");
     expect(config.userId).toBe("akame");
     expect(config.granulateIdle).toBe(true);
     expect(config.cooldownMs).toBe(30000);
@@ -77,7 +77,7 @@ describe("Каскад конфигурации: defaults → file → env", () 
       const config = loadConfig({});
 
       // MCP
-      expect(config.mcpUrl).toBe("http://athena-memory:8000/mcp/");
+      expect(config.mcpUrl).toBe("http://selti:8000/mcp/");
       expect(config.userId).toBe("akame");
       expect(config.apiKey).toBeUndefined();
 
