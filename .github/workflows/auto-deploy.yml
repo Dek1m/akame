@@ -3,6 +3,7 @@ name: Auto-deploy akame on master
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -12,6 +13,7 @@ jobs:
 
       - name: Sync code to server
         run: |
+          mkdir -p /home/svc_athene_ai@atom.ui/opencode/projects/akame/
           rsync -av --delete \
             $GITHUB_WORKSPACE/ \
             /home/svc_athene_ai@atom.ui/opencode/projects/akame/
