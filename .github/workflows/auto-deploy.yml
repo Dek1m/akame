@@ -13,10 +13,15 @@ jobs:
 
       - name: Sync code to server
         run: |
-          mkdir -p /home/svc_athene_ai@atom.ui/opencode/projects/akame/
+          TARGET="/home/svc_athene_ai@atom.ui/opencode/projects/akame"
+          mkdir -p "$TARGET"
           rsync -av --delete \
+            --exclude='.git/' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --no-perms \
             $GITHUB_WORKSPACE/ \
-            /home/svc_athene_ai@atom.ui/opencode/projects/akame/
+            "$TARGET/"
 
       - name: Build and deploy plugin
         run: |
